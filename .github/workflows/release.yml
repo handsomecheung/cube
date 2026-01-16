@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            artifact_name: cube
+            asset_name: cube-linux-x86_64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            artifact_name: cube
+            asset_name: cube-linux-aarch64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: cube.exe
+            asset_name: cube-windows-x86_64.exe
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: cube
+            asset_name: cube-macos-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: cube
+            asset_name: cube-macos-aarch64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
+
+      - name: Configure cargo for ARM64 cross-compile
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: |
+          mkdir -p .cargo
+          cat > .cargo/config.toml << EOF
+          [target.aarch64-unknown-linux-musl]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Strip binary
+        if: matrix.os != 'windows-latest'
+        run: |
+          # Use the correct strip tool for the target architecture
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
+            aarch64-linux-gnu-strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+          else
+            strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files for upload
+        run: |
+          mkdir release_assets
+          cp artifacts/cube-linux-x86_64/cube release_assets/cube-linux-x86_64
+          cp artifacts/cube-linux-aarch64/cube release_assets/cube-linux-aarch64
+          cp artifacts/cube-windows-x86_64.exe/cube.exe release_assets/cube-windows-x86_64.exe
+          cp artifacts/cube-macos-x86_64/cube release_assets/cube-macos-x86_64
+          cp artifacts/cube-macos-aarch64/cube release_assets/cube-macos-aarch64
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          generate_release_notes: true
+          # Upload the uniquely named files from the preparation directory
+          files: release_assets/*
