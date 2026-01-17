@@ -11,6 +11,9 @@ pub mod qr;
 #[cfg(feature = "encode")]
 pub mod terminal;
 
+#[cfg(feature = "wasm")]
+pub mod wasm;
+
 pub use chunk::{Chunk, ChunkHeader, DEFAULT_PAYLOAD_SIZE, MAX_PAYLOAD_SIZE, split_into_chunks_with_size};
 
 #[cfg(feature = "decode")]

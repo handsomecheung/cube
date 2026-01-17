@@ -1,17 +1,18 @@
 use anyhow::{anyhow, Result};
 
-#[cfg(any(feature = "encode", feature = "decode"))]
+#[cfg(feature = "encode")]
 use image::{Rgb, RgbImage};
 
-#[cfg(feature = "decode")]
+#[cfg(any(feature = "decode", feature = "wasm"))]
 use image::{DynamicImage, GrayImage};
 
 #[cfg(feature = "encode")]
 use qrcode::{Color, EcLevel, QrCode};
 
-#[cfg(feature = "decode")]
+#[cfg(any(feature = "decode", feature = "wasm"))]
 use rqrr::PreparedImage;
 
+#[cfg(any(feature = "encode", feature = "decode"))]
 use std::path::Path;
 
 #[cfg(feature = "encode")]
@@ -45,13 +46,13 @@ pub fn decode_qr_image(path: &Path) -> Result<Vec<u8>> {
     decode_qr_from_dynamic_image(&img)
 }
 
-#[cfg(feature = "decode")]
+#[cfg(any(feature = "decode", feature = "wasm"))]
 pub fn decode_qr_from_dynamic_image(img: &DynamicImage) -> Result<Vec<u8>> {
     let gray = img.to_luma8();
     decode_qr_from_gray(&gray)
 }
 
-#[cfg(feature = "decode")]
+#[cfg(any(feature = "decode", feature = "wasm"))]
 pub fn decode_qr_from_gray(gray: &GrayImage) -> Result<Vec<u8>> {
     let mut prepared = PreparedImage::prepare(gray.clone());
     let grids = prepared.detect_grids();
@@ -64,7 +65,7 @@ pub fn decode_qr_from_gray(gray: &GrayImage) -> Result<Vec<u8>> {
         .decode()
         .map_err(|e| anyhow!("Failed to decode QR code: {:?}", e))?;
 
-    Ok(content.as_bytes().to_vec())
+    Ok(content.into_bytes())
 }
 
 #[cfg(feature = "encode")]

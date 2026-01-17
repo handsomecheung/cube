@@ -6,10 +6,14 @@ description = "Convert any file to QR codes and back"
 license = "Apache-2.0"
 default-run = "cube-encode"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [features]
 default = ["encode", "decode"]
 encode = ["dep:qrcode", "dep:terminal_size", "dep:ctrlc"]
 decode = ["dep:opencv", "dep:rqrr"]
+wasm = ["dep:wasm-bindgen", "dep:rqrr", "dep:console_error_panic_hook", "dep:js-sys", "dep:web-sys"]
 
 [dependencies]
 qrcode = { version = "0.14", optional = true }
@@ -26,6 +30,10 @@ anyhow = "1.0"
 ctrlc = { version = "3.4", optional = true }
 terminal_size = { version = "0.4", optional = true }
 opencv = { version = "0.98.1", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["console"] }
 
 [[bin]]
 name = "cube-encode"

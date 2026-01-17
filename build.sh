@@ -13,5 +13,7 @@ fi
 
 # VCPKGRS_DYNAMIC=0 forces static linking for vcpkg dependencies
 # OPENCV_LINKAGE=static tells the opencv crate to link statically
-sudo docker run --rm -v "$(pwd):/code" -e VCPKGRS_DYNAMIC=0 -e OPENCV_LINKAGE=static "${image}" cargo build --release
+sudo docker run --rm -v "$(pwd):/code" -e VCPKGRS_DYNAMIC=0 -e OPENCV_LINKAGE=static "${image}" ./compile.sh
+
 sudo chown -R "$(id -u):$(id -g)" target
+sudo chown -R "$(id -u):$(id -g)" www/pkg
