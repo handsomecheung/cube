@@ -1,0 +1,40 @@
+use anyhow::Result;
+use clap::Parser;
+use std::path::PathBuf;
+
+use cube::{decode_qr_codes, decode_qr_video};
+
+#[derive(Parser)]
+#[command(name = "cube-decode")]
+#[command(author, version, about = "Decode QR code images or video back to original file", long_about = None)]
+struct Cli {
+    /// Input directory or video file
+    input: PathBuf,
+
+    /// Output file path (defaults to original filename in current directory)
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+}
+
+fn main() -> Result<()> {
+    let args = Cli::parse();
+
+    if !args.input.exists() {
+        anyhow::bail!("Input path does not exist: {}", args.input.display());
+    }
+
+    let result = if args.input.is_dir() {
+        println!("Decoding QR codes from directory: {}", args.input.display());
+        decode_qr_codes(&args.input, args.output.as_deref())?
+    } else {
+        println!("Decoding QR codes from video file: {}", args.input.display());
+        decode_qr_video(&args.input, args.output.as_deref())?
+    };
+
+    println!();
+    println!("Successfully decoded {} QR code(s)", result.num_chunks);
+    println!("Original filename: {}", result.original_filename);
+    println!("Output file: {}", result.output_path);
+
+    Ok(())
+}

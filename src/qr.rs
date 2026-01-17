@@ -1,11 +1,23 @@
 use anyhow::{anyhow, Result};
-use image::{DynamicImage, GrayImage, Rgb, RgbImage};
+
+#[cfg(any(feature = "encode", feature = "decode"))]
+use image::{Rgb, RgbImage};
+
+#[cfg(feature = "decode")]
+use image::{DynamicImage, GrayImage};
+
+#[cfg(feature = "encode")]
 use qrcode::{Color, EcLevel, QrCode};
+
+#[cfg(feature = "decode")]
 use rqrr::PreparedImage;
+
 use std::path::Path;
 
+#[cfg(feature = "encode")]
 const QR_SCALE: u32 = 10;
 
+#[cfg(feature = "encode")]
 pub fn generate_qr_image(data: &[u8]) -> Result<RgbImage> {
     // Use version that can fit the data, with medium error correction
     let code = QrCode::with_error_correction_level(data, EcLevel::M)
@@ -21,21 +33,25 @@ pub fn generate_qr_image(data: &[u8]) -> Result<RgbImage> {
     Ok(image)
 }
 
+#[cfg(feature = "encode")]
 pub fn save_qr_image(image: &RgbImage, path: &Path) -> Result<()> {
     image.save(path)?;
     Ok(())
 }
 
+#[cfg(feature = "decode")]
 pub fn decode_qr_image(path: &Path) -> Result<Vec<u8>> {
     let img = image::open(path)?;
     decode_qr_from_dynamic_image(&img)
 }
 
+#[cfg(feature = "decode")]
 pub fn decode_qr_from_dynamic_image(img: &DynamicImage) -> Result<Vec<u8>> {
     let gray = img.to_luma8();
     decode_qr_from_gray(&gray)
 }
 
+#[cfg(feature = "decode")]
 pub fn decode_qr_from_gray(gray: &GrayImage) -> Result<Vec<u8>> {
     let mut prepared = PreparedImage::prepare(gray.clone());
     let grids = prepared.detect_grids();
@@ -51,6 +67,7 @@ pub fn decode_qr_from_gray(gray: &GrayImage) -> Result<Vec<u8>> {
     Ok(content.as_bytes().to_vec())
 }
 
+#[cfg(feature = "encode")]
 pub fn render_qr_to_terminal(data: &[u8]) -> Result<String> {
     use terminal_size::{terminal_size, Height, Width};
 
@@ -133,7 +150,7 @@ pub fn render_qr_to_terminal(data: &[u8]) -> Result<String> {
     Ok(result)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "encode", feature = "decode"))]
 mod tests {
     use super::*;
 
