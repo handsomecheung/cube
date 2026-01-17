@@ -151,6 +151,33 @@ pub fn render_qr_to_terminal(data: &[u8]) -> Result<String> {
     Ok(result)
 }
 
+#[cfg(feature = "encode")]
+pub fn fits_in_terminal(data: &[u8]) -> Result<bool> {
+    use terminal_size::{terminal_size, Height, Width};
+
+    let code = QrCode::with_error_correction_level(data, EcLevel::M)
+        .map_err(|e| anyhow!("Failed to create QR code: {}", e))?;
+
+    let qr_size = code.width();
+    let qr_with_quiet = qr_size + 4; // Add quiet zone
+
+    // Fixed scale=1
+    let scale: usize = 1;
+    let display_width = qr_with_quiet * scale;
+    let display_height = (qr_with_quiet + 1) / 2 * scale;
+
+    let (term_width, term_height) = terminal_size()
+        .map(|(Width(w), Height(h))| (w as usize, h as usize))
+        .unwrap_or((80, 24));
+
+    // Check if it fits (allow 6 lines for header/footer/spacing)
+    if display_width > term_width || display_height + 6 > term_height {
+        Ok(false)
+    } else {
+        Ok(true)
+    }
+}
+
 #[cfg(all(test, feature = "encode", feature = "decode"))]
 mod tests {
     use super::*;

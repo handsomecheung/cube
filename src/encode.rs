@@ -9,12 +9,14 @@ use crate::qr::{generate_qr_image, render_qr_to_terminal, save_qr_image};
 pub struct EncodeResult {
     pub num_chunks: usize,
     pub output_files: Vec<String>,
+    pub effective_size: usize,
 }
 
 pub struct TerminalQrData {
     pub filename: String,
     pub total: usize,
     pub qr_strings: Vec<String>,
+    pub effective_size: usize,
 }
 
 pub fn encode_file(input_path: &Path, output_dir: &Path, chunk_size: Option<usize>) -> Result<EncodeResult> {
@@ -26,11 +28,30 @@ pub fn encode_file(input_path: &Path, output_dir: &Path, chunk_size: Option<usiz
 
     fs::create_dir_all(output_dir)?;
 
-    let chunks = if let Some(size) = chunk_size {
-        split_into_chunks_with_size(&data, filename, size)?
-    } else {
-        split_into_chunks(&data, filename)?
-    };
+    let mut current_size = chunk_size.unwrap_or(crate::chunk::MAX_PAYLOAD_SIZE);
+    let mut chunks;
+
+    loop {
+        chunks = split_into_chunks_with_size(&data, filename, current_size)?;
+        
+        // Test first chunk to see if it generates a valid QR code
+        if let Some(first_chunk) = chunks.first() {
+            let chunk_bytes = first_chunk.to_bytes()?;
+            let encoded = BASE64.encode(&chunk_bytes);
+            
+            if generate_qr_image(encoded.as_bytes()).is_ok() {
+                break;
+            }
+        } else {
+            break; // No data, nothing to do
+        }
+
+        if current_size > 100 {
+            current_size -= 50;
+        } else {
+             return Err(anyhow!("Failed to generate QR codes: data too long even at minimum payload size."));
+        }
+    }
     
     let num_chunks = chunks.len();
     let mut output_files = Vec::new();
@@ -40,6 +61,7 @@ pub fn encode_file(input_path: &Path, output_dir: &Path, chunk_size: Option<usiz
 
         let encoded = BASE64.encode(&chunk_bytes);
 
+        // We already tested generation, but handle errors just in case
         let qr_image = generate_qr_image(encoded.as_bytes())?;
 
         let output_filename = format!(
@@ -63,6 +85,7 @@ pub fn encode_file(input_path: &Path, output_dir: &Path, chunk_size: Option<usiz
     Ok(EncodeResult {
         num_chunks,
         output_files,
+        effective_size: current_size,
     })
 }
 
@@ -91,10 +114,11 @@ pub fn encode_data(data: &[u8], filename: &str, output_dir: &Path) -> Result<Enc
     Ok(EncodeResult {
         num_chunks,
         output_files,
+        effective_size: crate::chunk::MAX_PAYLOAD_SIZE,
     })
 }
 
-pub fn encode_file_for_terminal(input_path: &Path) -> Result<TerminalQrData> {
+pub fn encode_file_for_terminal(input_path: &Path, chunk_size: Option<usize>) -> Result<TerminalQrData> {
     let data = fs::read(input_path)?;
     let filename = input_path
         .file_name()
@@ -103,7 +127,34 @@ pub fn encode_file_for_terminal(input_path: &Path) -> Result<TerminalQrData> {
         .to_string();
 
     // Use smaller chunks for terminal display (smaller QR codes, more of them)
-    let chunks = split_into_chunks_with_size(&data, &filename, DEFAULT_PAYLOAD_SIZE)?;
+    // Default to DEFAULT_PAYLOAD_SIZE if not provided
+    let mut current_size = chunk_size.unwrap_or(DEFAULT_PAYLOAD_SIZE);
+    let mut chunks;
+
+    // Automatic resizing loop
+    loop {
+        chunks = split_into_chunks_with_size(&data, &filename, current_size)?;
+        
+        // Check if the first chunk fits (usually representative)
+        if let Some(first_chunk) = chunks.first() {
+             let chunk_bytes = first_chunk.to_bytes()?;
+             let encoded = BASE64.encode(&chunk_bytes);
+             
+             if crate::qr::fits_in_terminal(encoded.as_bytes())? {
+                 break; // Fits!
+             }
+        } else {
+             break; // No data
+        }
+
+        // Reduce size and retry
+        if current_size > 50 {
+            current_size -= 20;
+        } else {
+             return Err(anyhow!("Terminal too small to display QR codes even at minimum payload size. Please increase terminal size."));
+        }
+    }
+
     let total = chunks.len();
     let mut qr_strings = Vec::new();
 
@@ -118,5 +169,6 @@ pub fn encode_file_for_terminal(input_path: &Path) -> Result<TerminalQrData> {
         filename,
         total,
         qr_strings,
+        effective_size: current_size,
     })
 }

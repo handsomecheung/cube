@@ -2,7 +2,10 @@ use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 
-use cube::{display_qr_carousel, display_qr_once, encode_file, encode_file_for_terminal};
+use cube::{
+    display_qr_carousel, display_qr_once, encode_file, encode_file_for_terminal,
+    DEFAULT_PAYLOAD_SIZE, MAX_PAYLOAD_SIZE,
+};
 
 #[derive(Parser)]
 #[command(name = "cube-encode")]
@@ -37,11 +40,22 @@ fn main() -> Result<()> {
     let args = Cli::parse();
 
     if args.terminal {
-        println!("Encoding file for terminal display: {}", args.input.display());
+        println!(
+            "Encoding file for terminal display: {}",
+            args.input.display()
+        );
 
-        let data = encode_file_for_terminal(&args.input)?;
+        let data = encode_file_for_terminal(&args.input, args.chunk_size)?;
 
         println!("Generated {} QR code(s)", data.total);
+
+        let requested_size = args.chunk_size.unwrap_or(DEFAULT_PAYLOAD_SIZE);
+        if data.effective_size < requested_size {
+            println!(
+                "⚠️  Automatically reduced payload size to {} bytes to fit terminal.",
+                data.effective_size
+            );
+        }
         println!();
 
         if args.no_carousel || data.total == 1 {
@@ -61,12 +75,17 @@ fn main() -> Result<()> {
 
         let result = encode_file(&args.input, &args.output, args.chunk_size)?;
 
+        let requested_size = args.chunk_size.unwrap_or(MAX_PAYLOAD_SIZE);
+        if result.effective_size < requested_size {
+            println!();
+            println!(
+                "⚠️  Automatically reduced payload size to {} bytes to fit QR code capacity.",
+                result.effective_size
+            );
+        }
+
         println!();
         println!("Successfully created {} QR code(s)", result.num_chunks);
-        println!("Output files:");
-        for file in &result.output_files {
-            println!("  - {}", file);
-        }
     }
 
     Ok(())
