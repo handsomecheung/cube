@@ -67,7 +67,7 @@ impl QrStreamDecoder {
             gray_pixels.push(luma as u8);
         }
 
-        let gray_image = match GrayImage::from_raw(width, height, gray_pixels) {
+        let mut gray_image = match GrayImage::from_raw(width, height, gray_pixels) {
             Some(img) => img,
             None => {
                 return self.make_result(
@@ -78,19 +78,34 @@ impl QrStreamDecoder {
             }
         };
 
-        match decode_qr_from_gray(&gray_image) {
-            Ok(qr_bytes) => {
-                let qr_string = String::from_utf8_lossy(&qr_bytes).to_string();
-                if let Ok(chunk_bytes) = BASE64.decode(qr_string.trim()) {
-                    if let Ok(chunk) = Chunk::from_bytes(&chunk_bytes) {
-                        return self.process_chunk(chunk);
-                    }
-                }
-            }
-            Err(_) => {}
+        // 1. Try normal decode
+        if let Some(result) = self.try_decode(&gray_image) {
+            return result;
+        }
+
+        // 2. Try inverted decode (for dark mode / inverted QR codes)
+        // Invert pixels in place
+        for pixel in gray_image.iter_mut() {
+            *pixel = 255 - *pixel;
+        }
+
+        if let Some(result) = self.try_decode(&gray_image) {
+            return result;
         }
 
         self.current_status(ScanStatus::Scanning)
+    }
+
+    fn try_decode(&mut self, img: &GrayImage) -> Option<ScanResult> {
+        if let Ok(qr_bytes) = decode_qr_from_gray(img) {
+            let qr_string = String::from_utf8_lossy(&qr_bytes).to_string();
+            if let Ok(chunk_bytes) = BASE64.decode(qr_string.trim()) {
+                if let Ok(chunk) = Chunk::from_bytes(&chunk_bytes) {
+                    return Some(self.process_chunk(chunk));
+                }
+            }
+        }
+        None
     }
 
     fn process_chunk(&mut self, chunk: Chunk) -> ScanResult {
