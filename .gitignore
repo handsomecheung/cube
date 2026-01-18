@@ -22,3 +22,5 @@ target
 
 # Wasm build artifacts
 www/pkg/
+
+/local/
