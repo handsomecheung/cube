@@ -22,7 +22,6 @@ pub fn generate_qr_image(
     pixel_scale: u32,
     halftone_path: Option<&Path>,
 ) -> Result<(RgbImage, Version)> {
-    // If halftone image is provided, force High error correction for better scannability
     let ec_level = if halftone_path.is_some() {
         EcLevel::H
     } else {
@@ -39,109 +38,65 @@ pub fn generate_qr_image(
 
     let version = code.version();
 
-    if let Some(path) = halftone_path {
-        let bg_img =
-            image::open(path).map_err(|e| anyhow!("Failed to open halftone image: {}", e))?;
-        let bg_img = bg_img.into_rgb8();
-
-        let qr_width = code.width();
-        let quiet_zone = 4;
-        let total_width = (qr_width + 2 * quiet_zone) as u32 * pixel_scale;
-
-        let mut bg_resized = imageops::resize(
-            &bg_img,
-            total_width,
-            total_width,
-            imageops::FilterType::CatmullRom,
-        );
-
-        // Process Quiet Zone (Lighten it heavily to ensure contrast)
-        let data_start = quiet_zone as u32 * pixel_scale;
-        let data_end = (qr_width as u32 + quiet_zone as u32) * pixel_scale;
-
-        for (x, y, pixel) in bg_resized.enumerate_pixels_mut() {
-            if x < data_start || x >= data_end || y < data_start || y >= data_end {
-                // Mix 90% white
-                pixel[0] = (pixel[0] as f32 + (255.0 - pixel[0] as f32) * 0.9) as u8;
-                pixel[1] = (pixel[1] as f32 + (255.0 - pixel[1] as f32) * 0.9) as u8;
-                pixel[2] = (pixel[2] as f32 + (255.0 - pixel[2] as f32) * 0.9) as u8;
-            }
-        }
-
-        for y in 0..qr_width {
-            for x in 0..qr_width {
-                let color = code[(x, y)];
-                let is_dark = match color {
-                    Color::Dark => true,
-                    Color::Light => false,
-                };
-
-                // Finder Patterns (7x7) + Separator (1) = 8x8 area in corners
-                // Top-Left, Top-Right, Bottom-Left
-                let is_finder = (x < 8 && y < 8)
-                    || (x >= qr_width - 8 && y < 8)
-                    || (x < 8 && y >= qr_width - 8);
-
-                let px_start_x = (x as u32 + quiet_zone as u32) * pixel_scale;
-                let px_start_y = (y as u32 + quiet_zone as u32) * pixel_scale;
-
-                for py in 0..pixel_scale {
-                    for px in 0..pixel_scale {
-                        let bg_pixel = bg_resized.get_pixel_mut(px_start_x + px, px_start_y + py);
-
-                        if is_finder {
-                            // Finder Pattern: Solid colors for max readability
-                            if is_dark {
-                                bg_pixel[0] = 0;
-                                bg_pixel[1] = 0;
-                                bg_pixel[2] = 0;
-                            } else {
-                                bg_pixel[0] = 255;
-                                bg_pixel[1] = 255;
-                                bg_pixel[2] = 255;
-                            }
-                        } else {
-                            // Data Module: Halftone Dot Logic
-                            let border = if pixel_scale > 2 { pixel_scale / 4 } else { 0 };
-                            let is_center = px >= border
-                                && px < (pixel_scale - border)
-                                && py >= border
-                                && py < (pixel_scale - border);
-
-                            if is_center {
-                                if is_dark {
-                                    // Dark dot: Blend 80% black
-                                    bg_pixel[0] = (bg_pixel[0] as f32 * 0.2) as u8;
-                                    bg_pixel[1] = (bg_pixel[1] as f32 * 0.2) as u8;
-                                    bg_pixel[2] = (bg_pixel[2] as f32 * 0.2) as u8;
-                                } else {
-                                    // Light dot: Blend 80% white
-                                    bg_pixel[0] = (bg_pixel[0] as f32
-                                        + (255.0 - bg_pixel[0] as f32) * 0.8)
-                                        as u8;
-                                    bg_pixel[1] = (bg_pixel[1] as f32
-                                        + (255.0 - bg_pixel[1] as f32) * 0.8)
-                                        as u8;
-                                    bg_pixel[2] = (bg_pixel[2] as f32
-                                        + (255.0 - bg_pixel[2] as f32) * 0.8)
-                                        as u8;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        return Ok((bg_resized, version));
-    }
-
     let qr_image = code
         .render::<Rgb<u8>>()
         .min_dimensions(200, 200)
         .quiet_zone(true)
         .module_dimensions(pixel_scale, pixel_scale)
         .build();
+
+    if let Some(path) = halftone_path {
+        let bg_img =
+            image::open(path).map_err(|e| anyhow!("Failed to open halftone image: {}", e))?;
+        let bg_img = bg_img.into_rgb8();
+
+        let (w, h) = qr_image.dimensions();
+        let mut bg_resized = imageops::resize(&bg_img, w, h, imageops::FilterType::CatmullRom);
+
+        // Blend logic: specific dot shape (Halftone-like)
+        // Instead of modifying every pixel, we only modify the center of each module.
+        // This preserves the background structure in the "gaps" between modules.
+        for (x, y, qr_pixel) in qr_image.enumerate_pixels() {
+            let bg_pixel = bg_resized.get_pixel_mut(x, y);
+
+            // Determine if we are in the "center" of a module
+            // e.g., for scale 4, we want indices 1 and 2 (center 2x2) to be modified.
+            // 0 and 3 (borders) remain background.
+            let rel_x = x % pixel_scale;
+            let rel_y = y % pixel_scale;
+
+            // Calculate border size. Ensure we modify at least central pixel.
+            // scale 4 -> border 1 -> center range [1, 3) -> 2 pixels
+            // scale 3 -> border 1 -> center range [1, 2) -> 1 pixel
+            let border = if pixel_scale > 2 { pixel_scale / 4 } else { 0 };
+
+            let is_center = rel_x >= border
+                && rel_x < (pixel_scale - border)
+                && rel_y >= border
+                && rel_y < (pixel_scale - border);
+
+            if is_center {
+                let is_dark = qr_pixel[0] < 128;
+
+                if is_dark {
+                    // Darken center strongly to ensure readability
+                    // Blend 80% black
+                    bg_pixel[0] = (bg_pixel[0] as f32 * 0.2) as u8;
+                    bg_pixel[1] = (bg_pixel[1] as f32 * 0.2) as u8;
+                    bg_pixel[2] = (bg_pixel[2] as f32 * 0.2) as u8;
+                } else {
+                    // Lighten center strongly
+                    // Blend 80% white
+                    bg_pixel[0] = (bg_pixel[0] as f32 + (255.0 - bg_pixel[0] as f32) * 0.8) as u8;
+                    bg_pixel[1] = (bg_pixel[1] as f32 + (255.0 - bg_pixel[1] as f32) * 0.8) as u8;
+                    bg_pixel[2] = (bg_pixel[2] as f32 + (255.0 - bg_pixel[2] as f32) * 0.8) as u8;
+                }
+            }
+            // If not center, leave bg_pixel completely untouched!
+        }
+
+        return Ok((bg_resized, version));
+    }
 
     Ok((qr_image, version))
 }
@@ -161,7 +116,32 @@ pub fn decode_qr_image(path: &Path) -> Result<Vec<u8>> {
 #[cfg(any(feature = "decode", feature = "wasm"))]
 pub fn decode_qr_from_dynamic_image(img: &DynamicImage) -> Result<Vec<u8>> {
     let gray = img.to_luma8();
-    decode_qr_from_gray(&gray)
+
+    // Standard decode (rqrr uses adaptive thresholding, but might fail on noise)
+    if let Ok(content) = decode_qr_from_gray(&gray) {
+        return Ok(content);
+    }
+
+    // Explicit thresholding strategies.
+    // Halftone QR codes use strong black/white dots on a mid-tone background.
+    // Forcing a binary threshold can effectively remove the background noise.
+    let thresholds = [80, 100, 128, 160, 200];
+
+    for &t in &thresholds {
+        let mut t_img = gray.clone();
+        for p in t_img.pixels_mut() {
+            // p.0 is [u8; 1]
+            p.0[0] = if p.0[0] < t { 0 } else { 255 };
+        }
+
+        if let Ok(content) = decode_qr_from_gray(&t_img) {
+            return Ok(content);
+        }
+    }
+
+    Err(anyhow!(
+        "No QR code found in image (tried standard and thresholding)"
+    ))
 }
 
 #[cfg(any(feature = "decode", feature = "wasm"))]
