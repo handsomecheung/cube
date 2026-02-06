@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -e
 
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+current_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+source "${current_dir}/common.sh"
 
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
+bash "${current_dir}/rust/compile.wasm.sh"
+
+cd "${current_dir}/.."
 
 ${FOUNTAIN_DOCKER} stop ${FOUNTAIN_CONTAINER_CAMERA_WEB} 2>/dev/null || true
 ${FOUNTAIN_DOCKER} rm ${FOUNTAIN_CONTAINER_CAMERA_WEB} 2>/dev/null || true

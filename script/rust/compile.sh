@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
-cd "$(dirname "${BASH_SOURCE[0]}")/../.."
+current_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+cd "${current_dir}/../.."
 
 cargo build --bin fountain-encode --release --no-default-features --features encode
 cargo build --bin fountain-decode --release --features decode
 
-cargo build --target wasm32-unknown-unknown --release --no-default-features --features wasm
-
-wasm-bindgen target/wasm32-unknown-unknown/release/fountain.wasm --out-dir www/pkg --target web
+bash "${current_dir}/compile.wasm.sh"
