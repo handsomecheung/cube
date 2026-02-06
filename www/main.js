@@ -1,4 +1,4 @@
-import init, { QrStreamDecoder, ScanStatus } from "./pkg/fountain.js";
+import init, { QrStreamDecoder, ScanStatus } from "/scanner/pkg/fountain.js";
 
 let decoder = null;
 let stream = null;
@@ -17,7 +17,7 @@ const downloadBtn = document.getElementById("download-btn");
 
 async function run() {
     try {
-        await init();
+        await init("/scanner/pkg/fountain_bg.wasm");
         console.log("Wasm module loaded");
         statusDiv.firstChild.textContent = "Ready to scan.";
         startBtn.onclick = startCamera;

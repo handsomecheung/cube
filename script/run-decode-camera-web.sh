@@ -14,5 +14,5 @@ ${FOUNTAIN_DOCKER} run --rm -d \
     --name ${FOUNTAIN_CONTAINER_CAMERA_WEB} \
     -p 37250:80 \
     -v "$(pwd)/script/nginx.decode-camera-web.conf:/etc/nginx/nginx.conf" \
-    -v "$(pwd)/www:/fountain/www" \
+    -v "$(pwd)/www:/app/www/scanner" \
     nginx:latest
