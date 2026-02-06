@@ -1,4 +1,4 @@
-use crate::chunk::{decompress, merge_chunks, unpack_data, Chunk};
+use crate::chunk::{decompress, unpack_data, Chunk};
 use crate::qr::decode_qr_from_gray;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use image::GrayImage;
@@ -6,18 +6,10 @@ use raptorq::{Decoder, EncodingPacket, ObjectTransmissionInformation};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
-#[derive(Clone, Copy, PartialEq)]
-enum DecodeMode {
-    Unknown,
-    Standard, // Version 0
-    RaptorQ,  // Version 1
-}
-
 #[wasm_bindgen]
 pub struct QrStreamDecoder {
     chunks: HashMap<u32, Chunk>,
     total_chunks: Option<u32>,
-    mode: DecodeMode,
     decoder_raptorq: Option<Decoder>,
     raptorq_transfer_length: Option<u64>,
 }
@@ -60,7 +52,6 @@ impl QrStreamDecoder {
         QrStreamDecoder {
             chunks: HashMap::new(),
             total_chunks: None,
-            mode: DecodeMode::Unknown,
             decoder_raptorq: None,
             raptorq_transfer_length: None,
         }
@@ -122,110 +113,48 @@ impl QrStreamDecoder {
     }
 
     fn process_chunk(&mut self, chunk: Chunk) -> ScanResult {
-        // Detect mode on first chunk
-        if self.mode == DecodeMode::Unknown {
-            self.mode = if chunk.header.version == 1 {
-                DecodeMode::RaptorQ
-            } else {
-                DecodeMode::Standard
-            };
+        if self.decoder_raptorq.is_none() {
+            let transfer_len = chunk.header.total as u64;
+            let packet_size = chunk.header.packet_size;
+            self.raptorq_transfer_length = Some(transfer_len);
+
+            let config =
+                ObjectTransmissionInformation::with_defaults(transfer_len, packet_size);
+            self.decoder_raptorq = Some(Decoder::new(config));
+
+            // Estimate total packets needed (K) for progress bar
+            // Using ceiling division
+            let source_packets = (transfer_len as f64 / packet_size as f64).ceil() as u32;
+            self.total_chunks = Some(source_packets);
         }
 
-        match self.mode {
-            DecodeMode::Standard => {
-                if chunk.header.version != 0 {
-                    return self.current_status(ScanStatus::Scanning);
-                }
+        if !self.chunks.contains_key(&chunk.header.index) {
+            self.chunks.insert(chunk.header.index, chunk.clone());
 
-                let chunk_total = chunk.header.total as u32;
-                let chunk_index = chunk.header.index as u32;
-
-                if self.total_chunks.is_none() {
-                    self.total_chunks = Some(chunk_total);
-                }
-
-                if let Some(total) = self.total_chunks {
-                    if total != chunk_total {
-                        return self.current_status(ScanStatus::Scanning);
+            if let Some(dec) = &mut self.decoder_raptorq {
+                let packet = EncodingPacket::deserialize(&chunk.data);
+                if let Some(result_data) = dec.decode(packet) {
+                    // Success!
+                    let mut final_data = result_data;
+                    if let Some(len) = self.raptorq_transfer_length {
+                        final_data.truncate(len as usize);
                     }
-                }
 
-                if !self.chunks.contains_key(&chunk_index) {
-                    self.chunks.insert(chunk_index, chunk);
-
-                    if let Some(total) = self.total_chunks {
-                        if self.chunks.len() as u32 == total {
-                            let mut sorted_chunks: Vec<Chunk> =
-                                self.chunks.values().cloned().collect();
-                            sorted_chunks.sort_by_key(|c| c.header.index);
-
-                            match merge_chunks(sorted_chunks) {
-                                Ok((filename, data)) => {
-                                    return self.make_result(ScanStatus::Complete, filename, data);
-                                }
-                                Err(_) => {
-                                    return self.make_result(
-                                        ScanStatus::Error,
-                                        "Merge failed".to_string(),
-                                        vec![],
-                                    );
-                                }
-                            }
+                    match self.finalize_raptorq(final_data) {
+                        Ok((filename, data)) => {
+                            return self.make_result(ScanStatus::Complete, filename, data)
+                        }
+                        Err(_) => {
+                            return self.make_result(
+                                ScanStatus::Error,
+                                "Decompress failed".to_string(),
+                                vec![],
+                            )
                         }
                     }
-                    return self.current_status(ScanStatus::ChunkFound);
                 }
             }
-            DecodeMode::RaptorQ => {
-                if chunk.header.version != 1 {
-                    return self.current_status(ScanStatus::Scanning);
-                }
-
-                if self.decoder_raptorq.is_none() {
-                    let transfer_len = chunk.header.total as u64;
-                    let packet_size = chunk.header.packet_size;
-                    self.raptorq_transfer_length = Some(transfer_len);
-
-                    let config =
-                        ObjectTransmissionInformation::with_defaults(transfer_len, packet_size);
-                    self.decoder_raptorq = Some(Decoder::new(config));
-
-                    // Estimate total packets needed (K) for progress bar
-                    // Using ceiling division
-                    let source_packets = (transfer_len as f64 / packet_size as f64).ceil() as u32;
-                    self.total_chunks = Some(source_packets);
-                }
-
-                if !self.chunks.contains_key(&chunk.header.index) {
-                    self.chunks.insert(chunk.header.index, chunk.clone());
-
-                    if let Some(dec) = &mut self.decoder_raptorq {
-                        let packet = EncodingPacket::deserialize(&chunk.data);
-                        if let Some(result_data) = dec.decode(packet) {
-                            // Success!
-                            let mut final_data = result_data;
-                            if let Some(len) = self.raptorq_transfer_length {
-                                final_data.truncate(len as usize);
-                            }
-
-                            match self.finalize_raptorq(final_data) {
-                                Ok((filename, data)) => {
-                                    return self.make_result(ScanStatus::Complete, filename, data)
-                                }
-                                Err(_) => {
-                                    return self.make_result(
-                                        ScanStatus::Error,
-                                        "Decompress failed".to_string(),
-                                        vec![],
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    return self.current_status(ScanStatus::ChunkFound);
-                }
-            }
-            DecodeMode::Unknown => unreachable!(),
+            return self.current_status(ScanStatus::ChunkFound);
         }
 
         self.current_status(ScanStatus::Scanning)

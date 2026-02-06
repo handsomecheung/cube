@@ -17,15 +17,14 @@ use std::io::{Read, Write};
 pub const DEFAULT_PAYLOAD_SIZE: usize = 100; // Small default for terminal display
 pub const MAX_PAYLOAD_SIZE: usize = 1400; // Max for file output
 pub const CHECKSUM_SIZE: usize = 8;
-pub const V0_HEADER_SIZE: usize = 9; // 1 (version) + 4 (total) + 4 (index)
-pub const V1_HEADER_SIZE: usize = 11; // 1 (version) + 4 (transfer len) + 4 (esi) + 2 (packet size)
+pub const HEADER_SIZE: usize = 11; // 1 (version) + 4 (transfer len) + 4 (esi) + 2 (packet size)
 
 #[derive(Debug, Clone)]
 pub struct ChunkHeader {
     pub version: u8,
-    pub total: u32,       // V0: Total Chunks, V1: Transfer Length
-    pub index: u32,       // V0: Index, V1: ESI
-    pub packet_size: u16, // V0: Unused, V1: Packet Size
+    pub total: u32,       // Transfer Length
+    pub index: u32,       // ESI
+    pub packet_size: u16, // Packet Size
 }
 
 #[derive(Debug, Clone)]
@@ -36,24 +35,12 @@ pub struct Chunk {
 
 impl ChunkHeader {
     pub fn to_bytes(&self) -> Vec<u8> {
-        match self.version {
-            0 => {
-                let mut bytes = vec![0u8; V0_HEADER_SIZE];
-                bytes[0] = self.version;
-                bytes[1..5].copy_from_slice(&self.total.to_be_bytes());
-                bytes[5..9].copy_from_slice(&self.index.to_be_bytes());
-                bytes
-            }
-            1 => {
-                let mut bytes = vec![0u8; V1_HEADER_SIZE];
-                bytes[0] = self.version;
-                bytes[1..5].copy_from_slice(&self.total.to_be_bytes());
-                bytes[5..9].copy_from_slice(&self.index.to_be_bytes());
-                bytes[9..11].copy_from_slice(&self.packet_size.to_be_bytes());
-                bytes
-            }
-            _ => panic!("Unsupported version for encoding: {}", self.version),
-        }
+        let mut bytes = vec![0u8; HEADER_SIZE];
+        bytes[0] = self.version;
+        bytes[1..5].copy_from_slice(&self.total.to_be_bytes());
+        bytes[5..9].copy_from_slice(&self.index.to_be_bytes());
+        bytes[9..11].copy_from_slice(&self.packet_size.to_be_bytes());
+        bytes
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<(Self, usize)> {
@@ -61,42 +48,25 @@ impl ChunkHeader {
             return Err(anyhow!("Invalid header: empty"));
         }
         let version = bytes[0];
-        match version {
-            0 => {
-                if bytes.len() < V0_HEADER_SIZE {
-                    return Err(anyhow!("Invalid V0 header: too short"));
-                }
-                let total = u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]);
-                let index = u32::from_be_bytes([bytes[5], bytes[6], bytes[7], bytes[8]]);
-                Ok((
-                    ChunkHeader {
-                        version,
-                        total,
-                        index,
-                        packet_size: 0,
-                    },
-                    V0_HEADER_SIZE,
-                ))
-            }
-            1 => {
-                if bytes.len() < V1_HEADER_SIZE {
-                    return Err(anyhow!("Invalid V1 header: too short"));
-                }
-                let total = u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]);
-                let index = u32::from_be_bytes([bytes[5], bytes[6], bytes[7], bytes[8]]);
-                let packet_size = u16::from_be_bytes([bytes[9], bytes[10]]);
-                Ok((
-                    ChunkHeader {
-                        version,
-                        total,
-                        index,
-                        packet_size,
-                    },
-                    V1_HEADER_SIZE,
-                ))
-            }
-            _ => Err(anyhow!("Unsupported chunk version: {}", version)),
+        if version != 1 {
+            return Err(anyhow!("Unsupported chunk version: {}. Only Version 1 (RaptorQ) is supported.", version));
         }
+
+        if bytes.len() < HEADER_SIZE {
+            return Err(anyhow!("Invalid header: too short"));
+        }
+        let total = u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]);
+        let index = u32::from_be_bytes([bytes[5], bytes[6], bytes[7], bytes[8]]);
+        let packet_size = u16::from_be_bytes([bytes[9], bytes[10]]);
+        Ok((
+            ChunkHeader {
+                version,
+                total,
+                index,
+                packet_size,
+            },
+            HEADER_SIZE,
+        ))
     }
 }
 
@@ -190,160 +160,9 @@ pub fn unpack_data(packed: &[u8]) -> Result<(String, Vec<u8>)> {
     Ok((filename, content))
 }
 
-pub fn split_into_chunks(data: &[u8], filename: &str) -> Result<Vec<Chunk>> {
-    split_into_chunks_with_size(data, filename, MAX_PAYLOAD_SIZE)
-}
-
-pub fn split_into_chunks_with_size(
-    data: &[u8],
-    filename: &str,
-    payload_size: usize,
-) -> Result<Vec<Chunk>> {
-    let packed = pack_data(data, filename);
-    let compressed = compress(&packed)?;
-    Ok(split_compressed_into_chunks(&compressed, payload_size).collect())
-}
-
-pub struct ChunkIterator<'a> {
-    compressed: &'a [u8],
-    payload_size: usize,
-    total_chunks: u32,
-    current_index: usize,
-    is_empty_input: bool,
-    finished: bool,
-}
-
-impl<'a> Iterator for ChunkIterator<'a> {
-    type Item = Chunk;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.finished {
-            return None;
-        }
-
-        if self.is_empty_input {
-            self.finished = true;
-            return Some(Chunk {
-                header: ChunkHeader {
-                    version: 0,
-                    total: 1,
-                    index: 0,
-                    packet_size: 0,
-                },
-                data: Vec::new(),
-            });
-        }
-
-        if self.current_index as u32 >= self.total_chunks {
-            self.finished = true;
-            return None;
-        }
-
-        let start = self.current_index * self.payload_size;
-        let end = (start + self.payload_size).min(self.compressed.len());
-        let chunk_data = &self.compressed[start..end];
-
-        let chunk = Chunk {
-            header: ChunkHeader {
-                version: 0,
-                total: self.total_chunks,
-                index: self.current_index as u32,
-                packet_size: 0,
-            },
-            data: chunk_data.to_vec(),
-        };
-
-        self.current_index += 1;
-        Some(chunk)
-    }
-}
-
-pub fn split_compressed_into_chunks(compressed: &[u8], payload_size: usize) -> ChunkIterator<'_> {
-    let total_chunks = (compressed.len() + payload_size - 1) / payload_size;
-    let total_chunks = total_chunks.max(1) as u32;
-
-    ChunkIterator {
-        compressed,
-        payload_size,
-        total_chunks,
-        current_index: 0,
-        is_empty_input: compressed.is_empty(),
-        finished: false,
-    }
-}
-
-pub fn merge_chunks(mut chunks: Vec<Chunk>) -> Result<(String, Vec<u8>)> {
-    if chunks.is_empty() {
-        return Err(anyhow!("No chunks to merge"));
-    }
-
-    chunks.sort_by_key(|c| c.header.index);
-
-    let expected_total = chunks[0].header.total;
-
-    if chunks.len() as u32 != expected_total {
-        return Err(anyhow!(
-            "Missing chunks: expected {}, got {}",
-            expected_total,
-            chunks.len()
-        ));
-    }
-
-    for (i, chunk) in chunks.iter().enumerate() {
-        if chunk.header.index != i as u32 {
-            return Err(anyhow!("Missing chunk at index {}", i));
-        }
-    }
-
-    let mut compressed_data = Vec::new();
-    for chunk in chunks {
-        compressed_data.extend_from_slice(&chunk.data);
-    }
-
-    let packed = decompress(&compressed_data)?;
-    unpack_data(&packed)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_chunk_roundtrip() {
-        let data = b"Hello, World! This is a test.";
-        let chunks = split_into_chunks(data, "test.txt").unwrap();
-
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].header.total, 1);
-        assert_eq!(chunks[0].header.index, 0);
-
-        let (filename, restored) = merge_chunks(chunks).unwrap();
-        assert_eq!(filename, "test.txt");
-        assert_eq!(restored, data);
-    }
-
-    #[test]
-    fn test_large_data_chunking() {
-        // Use data large enough to require multiple chunks even after compression
-        let mut x: u64 = 12345;
-        let data: Vec<u8> = (0..100000)
-            .map(|_| {
-                x = x.wrapping_mul(6364136223846793005).wrapping_add(1);
-                (x >> 56) as u8
-            })
-            .collect();
-        let chunks = split_into_chunks(&data, "large.bin").unwrap();
-
-        assert!(
-            chunks.len() > 1,
-            "Expected multiple chunks, got {}",
-            chunks.len()
-        );
-
-        let (filename, restored) = merge_chunks(chunks).unwrap();
-        assert_eq!(filename, "large.bin");
-        assert_eq!(restored, data);
-    }
 
     #[test]
     fn test_pack_unpack() {

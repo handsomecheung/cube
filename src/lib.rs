@@ -15,7 +15,7 @@ pub mod terminal;
 pub mod wasm;
 
 pub use chunk::{
-    split_into_chunks_with_size, Chunk, ChunkHeader, DEFAULT_PAYLOAD_SIZE, MAX_PAYLOAD_SIZE,
+    Chunk, ChunkHeader, DEFAULT_PAYLOAD_SIZE, MAX_PAYLOAD_SIZE,
 };
 
 #[cfg(feature = "decode")]
@@ -23,7 +23,7 @@ pub use decode::{decode_from_gif, decode_from_images, decode_from_video, DecodeR
 
 #[cfg(feature = "encode")]
 pub use encode::{
-    encode_file_for_terminal, encode_file_for_terminal_raptorq, encode_file_to_gif,
+    encode_file_for_terminal, encode_file_to_gif,
     encode_file_to_images, EncodeResult, TerminalQrData,
 };
 
