@@ -2,13 +2,13 @@ use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 
-use fountain::{decode_from_gif, decode_from_images, decode_from_video};
+use fountain::{decode_from_gif, decode_from_images};
 
 #[derive(Parser)]
 #[command(name = "fountain-decode")]
-#[command(author, version, about = "Decode QR code images or video back to original file", long_about = None)]
+#[command(author, version, about = "Decode QR code images back to original file", long_about = None)]
 struct Cli {
-    /// Input directory or video file
+    /// Input directory (containing PNGs) or GIF file
     input: PathBuf,
 
     /// Output file path (defaults to original filename in current directory)
@@ -36,11 +36,10 @@ fn main() -> Result<()> {
         if is_gif {
             decode_from_gif(&args.input, args.output.as_deref())?
         } else {
-            println!(
-                "Decoding QR codes from video file: {}",
+            anyhow::bail!(
+                "Unsupported input file type: {}. Only directories (containing PNGs) or GIF files are supported.",
                 args.input.display()
             );
-            decode_from_video(&args.input, args.output.as_deref())?
         }
     };
 

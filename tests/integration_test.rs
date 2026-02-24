@@ -147,46 +147,15 @@ fn test_encode_decode_gif_roundtrip() {
     fs::write(&source_file_path, original_content).expect("Failed to write source file");
 
     println!("Encoding to GIF...");
-    let encode_result = fountain::encode_file_to_gif(&source_file_path, &output_gif_path, None, 100, 4)
-        .expect("GIF encoding failed");
+    let encode_result =
+        fountain::encode_file_to_gif(&source_file_path, &output_gif_path, None, 100, 4)
+            .expect("GIF encoding failed");
 
     assert!(encode_result.num_chunks > 0);
 
     println!("Decoding from GIF...");
     let decode_result = fountain::decode_from_gif(&output_gif_path, Some(&decoded_output_path))
         .expect("GIF decoding failed");
-
-    assert!(decode_result.num_chunks > 0);
-
-    let decoded_content =
-        fs::read_to_string(&decoded_output_path).expect("Failed to read decoded file");
-    assert_eq!(original_content, decoded_content);
-}
-
-#[test]
-#[cfg(all(feature = "encode", feature = "decode"))]
-fn test_encode_decode_video_roundtrip() {
-    let temp_dir = TempDir::new().expect("Failed to create temp dir");
-    let input_dir = temp_dir.path().join("input");
-    let output_gif_path = temp_dir.path().join("video_test.gif");
-    let decoded_output_path = temp_dir.path().join("decoded_from_video.txt");
-
-    fs::create_dir(&input_dir).expect("Failed to create input dir");
-
-    let source_file_path = input_dir.join("source_video.txt");
-    let original_content = "Roundtrip test for Video decoding (via GIF).";
-    fs::write(&source_file_path, original_content).expect("Failed to write source file");
-
-    println!("Encoding to GIF (as video source)...");
-    let encode_result = fountain::encode_file_to_gif(&source_file_path, &output_gif_path, None, 100, 4)
-        .expect("GIF encoding failed");
-
-    assert!(encode_result.num_chunks > 0);
-
-    println!("Decoding from Video (GIF file)...");
-    let decode_result =
-        fountain::decode_from_video(&output_gif_path, Some(&decoded_output_path))
-            .expect("Video decoding failed");
 
     assert!(decode_result.num_chunks > 0);
 
@@ -209,15 +178,18 @@ fn test_terminal_generation() {
 
     println!("Encoding for terminal...");
     // Use a small chunk size to force multiple packets
-    let terminal_data = fountain::encode_file_for_terminal(&source_file_path, Some(100))
-        .expect("Encoding failed");
+    let terminal_data =
+        fountain::encode_file_for_terminal(&source_file_path, Some(100)).expect("Encoding failed");
 
     assert!(terminal_data.total > 0);
     assert!(!terminal_data.qr_strings.is_empty());
     assert_eq!(terminal_data.total, terminal_data.qr_strings.len());
-    
+
     // Basic validation of the QR string format (ASCII art)
     for qr in &terminal_data.qr_strings {
-        assert!(qr.contains("██"), "QR string should contain block characters");
+        assert!(
+            qr.contains("██"),
+            "QR string should contain block characters"
+        );
     }
 }

@@ -2,13 +2,6 @@ use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use image::codecs::gif::GifDecoder;
 use image::{AnimationDecoder, DynamicImage};
-use opencv::{
-    core::Mat,
-    imgproc,
-    objdetect::QRCodeDetector,
-    prelude::*,
-    videoio::{self, VideoCapture},
-};
 use raptorq::{Decoder, EncodingPacket, ObjectTransmissionInformation};
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -217,104 +210,4 @@ pub fn decode_from_images(input_dir: &Path, output_path: Option<&Path>) -> Resul
         output_path: final_output_path.to_string_lossy().to_string(),
         num_chunks,
     })
-}
-
-pub fn decode_from_video(input_file: &Path, output_path: Option<&Path>) -> Result<DecodeResult> {
-    let mut cam = VideoCapture::from_file(&input_file.to_string_lossy(), videoio::CAP_ANY)?;
-    if !cam.is_opened()? {
-        return Err(anyhow!(
-            "Failed to open video file: {}",
-            input_file.display()
-        ));
-    }
-
-    let frame_count = cam.get(videoio::CAP_PROP_FRAME_COUNT)? as u64;
-    println!("Video has {} frames. Starting scan...", frame_count);
-
-    let mut chunks = HashMap::new();
-    let mut frame = Mat::default();
-    let mut gray_frame = Mat::default();
-    let mut points = Mat::default();
-    let mut straight_code = Mat::default();
-    let detector = QRCodeDetector::default()?;
-    let mut decoder_raptorq: Option<Decoder> = None;
-
-    for i in 0..frame_count {
-        if !cam.read(&mut frame)? {
-            break;
-        }
-
-        imgproc::cvt_color(
-            &frame,
-            &mut gray_frame,
-            imgproc::COLOR_BGR2GRAY,
-            0,
-            opencv::core::AlgorithmHint::ALGO_HINT_DEFAULT,
-        )?;
-
-        let mut qr_bytes =
-            detector.detect_and_decode(&gray_frame, &mut points, &mut straight_code)?;
-
-        if qr_bytes.is_empty() {
-            let mut inverted_frame = Mat::default();
-            opencv::core::bitwise_not(&gray_frame, &mut inverted_frame, &opencv::core::no_array())?;
-            qr_bytes =
-                detector.detect_and_decode(&inverted_frame, &mut points, &mut straight_code)?;
-        }
-
-        if !qr_bytes.is_empty() {
-            let qr_string = String::from_utf8_lossy(&qr_bytes).to_string();
-            if let Ok(chunk_bytes) = BASE64.decode(&qr_string) {
-                if let Ok(chunk) = Chunk::from_bytes(&chunk_bytes) {
-                    if decoder_raptorq.is_none() {
-                        let config = ObjectTransmissionInformation::with_defaults(
-                            chunk.header.total as u64,
-                            chunk.header.packet_size,
-                        );
-                        decoder_raptorq = Some(Decoder::new(config));
-                        println!("Initialized RaptorQ decoder");
-                    }
-
-                    if !chunks.contains_key(&chunk.header.index) {
-                        println!(
-                            "Found RaptorQ chunk {} in frame {}",
-                            chunk.header.index,
-                            i + 1,
-                        );
-                        chunks.insert(chunk.header.index, chunk.clone());
-
-                        if let Some(dec) = &mut decoder_raptorq {
-                            let packet = EncodingPacket::deserialize(&chunk.data);
-                            if let Some(result_data) = dec.decode(packet) {
-                                println!("RaptorQ decoding successful!");
-                                let mut final_data = result_data;
-                                final_data.truncate(chunk.header.total as usize);
-                                let packed = decompress(&final_data)?;
-                                let (original_filename, data) = unpack_data(&packed)?;
-
-                                let final_output_path = match output_path {
-                                    Some(p) => p.to_path_buf(),
-                                    None => Path::new(".").join(&original_filename),
-                                };
-                                fs::write(&final_output_path, &data)?;
-
-                                return Ok(DecodeResult {
-                                    original_filename,
-                                    output_path: final_output_path
-                                        .to_string_lossy()
-                                        .to_string(),
-                                    num_chunks: chunks.len(),
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Err(anyhow!(
-        "Could not decode with RaptorQ (insufficient packets after scanning {} frames)",
-        frame_count
-    ))
 }

@@ -17,11 +17,11 @@ This makes Fountain ideal for **one-way, offline transmission** where the sender
 
 - 🚀 **High Resilience:** Uses RaptorQ (RFC 6330) for industrial-grade erasure coding.
 - 📱 **Terminal Mode:** Display QR codes directly in your terminal with a carousel effect.
-- 🎞️ **GIF & Video Support:** Generate optimized, dither-free GIFs for easy sharing, or decode from recorded video files.
-- 🖼️ **Image Export:** Save QR codes as a series of PNG/JPG images.
+- 🎞️ **GIF Support:** Generate optimized, dither-free GIFs for easy sharing.
+- 🖼️ **Image Export:** Save QR codes as a series of PNG images.
 - 🌐 **Web Scanner (WASM):** Decode QR codes directly in your browser using your phone's camera. Perfect for receiving files on mobile without installing any apps.
 - 🛠️ **Configurable:** Adjust pixel scale, payload size, and carousel intervals to match your hardware's capabilities.
-- 🦀 **Pure Rust (mostly):** The encoder is lightweight and has zero heavy dependencies.
+- 🦀 **Pure Rust:** The project is now 100% Rust with no heavy external dependencies like OpenCV.
 
 ## 📥 Downloads
 
@@ -30,15 +30,11 @@ Pre-compiled binaries for the **Encoder** and the **Web Scanner (WASM)** are ava
 - **fountain-encode**: Standalone binaries for Linux/macOS and Windows.
 - **fountain-wasm**: Pre-built WASM and JS assets for web deployment.
 
-*Note: The Decoder CLI is currently best used via the portable static build or local cargo build due to OpenCV dependencies.*
-
 ## 📦 Installation
 
 ### Prerequisites
 - **Encoder:** No special requirements.
-- **Decoder (CLI):** 
-    - **Normal Build:** Requires [OpenCV](https://opencv.org/) development libraries installed on the system (both at compile time and runtime).
-    - **Static Build:** If you use the portable static build (via Docker), the resulting binary is standalone and does **not** require OpenCV to be installed on the host system.
+- **Decoder (CLI):** No special requirements (Pure Rust).
 - **Decoder (WASM, Web Scanner):** Requires `wasm-bindgen-cli`.
 
 ### Build from Source
@@ -46,7 +42,7 @@ Pre-compiled binaries for the **Encoder** and the **Web Scanner (WASM)** are ava
 #### Encoder and Decoder
 
 **Option 1: Portable Static Build (Recommended)**
-Builds a standalone binary that includes all dependencies (including OpenCV). This requires Docker.
+Builds a standalone binary using Docker.
 ```bash
 ./script/build.sh
 ```
@@ -55,9 +51,6 @@ Builds a standalone binary that includes all dependencies (including OpenCV). Th
 ```bash
 # Build both encoder and decoder
 cargo build --release
-
-# Build encoder only (no OpenCV needed)
-cargo build --release --bin fountain-encode --no-default-features --features encode
 ```
 
 #### Web Scanner (WASM)
@@ -88,7 +81,7 @@ fountain-encode [OPTIONS] <INPUT>
 **Options:**
 - `-t, --terminal`: Display QR codes directly in your terminal using a carousel.
 - `-g, --gif-output-file <FILE>`: Save the QR stream as an optimized animated GIF.
-- `-m, --image-output-dir <DIR>`: Export QR codes as a series of individual image files (PNG/JPG).
+- `-m, --image-output-dir <DIR>`: Export QR codes as a series of individual image files (PNG).
 - `-i, --interval <MS>`: Interval in milliseconds for switching frames in terminal or GIF (default: `2000`).
 - `-s, --chunk-size <BYTES>`: Max payload size per QR packet. Smaller values result in simpler, easier-to-scan QR codes but more frames.
 - `--pixel-scale <N>`: Scale factor for QR pixels (default: `4`).
@@ -113,16 +106,16 @@ fountain-decode [OPTIONS] <INPUT>
 ```
 
 **Arguments:**
-- `<INPUT>`: Path to a video file, a GIF, or a directory containing QR image frames.
+- `<INPUT>`: Path to a GIF file, or a directory containing QR image frames (PNG).
 
 **Options:**
 - `-o, --output <FILE>`: Path for the reconstructed file. If omitted, uses the original filename.
 
 **Examples:**
 
-*Decode from a video file:*
+*Decode from a GIF file:*
 ```bash
-fountain-decode recording.mp4 -o restored_file.zip
+fountain-decode my_transfer.gif -o restored_file.zip
 ```
 
 *Decode from a directory of images:*
@@ -135,9 +128,9 @@ fountain-decode ./qr_frames/
 
 1. **Chunking:** The file is split into small blocks.
 2. **RaptorQ Encoding:** These blocks are transformed into a series of fountain packets. Each packet contains a small piece of the puzzle and metadata describing how it relates to the whole.
-3. **Anchor Frame:** For GIFs and videos, Fountain inserts an initial "Anchor Frame" containing the original filename and metadata to help the decoder prepare.
+3. **Anchor Frame:** For GIFs, Fountain inserts an initial "Anchor Frame" containing the original filename and metadata to help the decoder prepare.
 4. **QR Generation:** Each packet is encoded into a high-density QR code.
-5. **Reconstruction:** The decoder captures frames, extracts the fountain packets, and once it has enough mathematical overhead (usually < 5% extra), it instantly reconstructs the original file.
+5. **Reconstruction:** The decoder captures frames (from GIF or images), extracts the fountain packets, and once it has enough mathematical overhead (usually < 5% extra), it instantly reconstructs the original file.
 
 ## 🧪 Testing
 

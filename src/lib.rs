@@ -19,7 +19,7 @@ pub use chunk::{
 };
 
 #[cfg(feature = "decode")]
-pub use decode::{decode_from_gif, decode_from_images, decode_from_video, DecodeResult};
+pub use decode::{decode_from_gif, decode_from_images, DecodeResult};
 
 #[cfg(feature = "encode")]
 pub use encode::{
