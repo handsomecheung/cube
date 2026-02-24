@@ -34,7 +34,7 @@ Pre-compiled binaries for the **Encoder** and the **Web Scanner (WASM)** are ava
 
 ### Prerequisites
 - **Encoder:** No special requirements.
-- **Decoder (CLI):** No special requirements (Pure Rust).
+- **Decoder (CLI):** No special requirements.
 - **Decoder (WASM, Web Scanner):** Requires `wasm-bindgen-cli`.
 
 ### Build from Source

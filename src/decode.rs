@@ -9,7 +9,7 @@ use std::io::BufReader;
 use std::path::Path;
 
 use crate::chunk::{decompress, unpack_data, Chunk};
-use crate::qr::{decode_qr_from_dynamic_image, decode_qr_image};
+use crate::qr::{decode_qr_from_dynamic_image, QR_FILE_EXTENSION};
 
 pub struct DecodeResult {
     pub original_filename: String,
@@ -17,190 +17,68 @@ pub struct DecodeResult {
     pub num_chunks: usize,
 }
 
-fn reconstruct_raptorq(chunks: Vec<Chunk>) -> Result<(String, Vec<u8>)> {
-    if chunks.is_empty() {
-        return Err(anyhow!("No chunks to reconstruct"));
-    }
-
-    // Assume all chunks belong to the same file/encoding
-    let first_header = &chunks[0].header;
-    let transfer_length = first_header.total as u64;
-    let packet_size = first_header.packet_size;
-
-    let config = ObjectTransmissionInformation::with_defaults(transfer_length, packet_size);
-    let mut decoder = Decoder::new(config);
-
-    let mut result = None;
-    for chunk in chunks {
-        let packet = EncodingPacket::deserialize(&chunk.data);
-        if let Some(data) = decoder.decode(packet) {
-            result = Some(data);
-            break;
-        }
-    }
-
-    match result {
-        Some(data) => {
-            // RaptorQ pads with zeros to fill the last packet.
-            // We need to truncate to the exact transfer length.
-            let mut final_data = data;
-            final_data.truncate(transfer_length as usize);
-
-            let packed = decompress(&final_data)?;
-            unpack_data(&packed)
-        }
-        None => Err(anyhow!("Not enough chunks to reconstruct data")),
-    }
+struct RaptorQStreamDecoder {
+    chunks: HashMap<u32, Chunk>,
+    decoder: Option<Decoder>,
 }
 
-pub fn decode_from_gif(input_file: &Path, output_path: Option<&Path>) -> Result<DecodeResult> {
-    let file = File::open(input_file)?;
-    let reader = BufReader::new(file);
-    let decoder = GifDecoder::new(reader)?;
-    let frames = decoder.into_frames();
+impl RaptorQStreamDecoder {
+    fn new() -> Self {
+        Self {
+            chunks: HashMap::new(),
+            decoder: None,
+        }
+    }
 
-    println!("Decoding QR codes from GIF: {}", input_file.display());
+    fn add_chunk(&mut self, chunk: Chunk) -> Result<Option<(String, Vec<u8>)>> {
+        if self.decoder.is_none() {
+            let config = ObjectTransmissionInformation::with_defaults(
+                chunk.header.total as u64,
+                chunk.header.packet_size,
+            );
+            self.decoder = Some(Decoder::new(config));
+        }
 
-    let mut chunks = HashMap::new();
-    let mut frame_count = 0;
-    let mut decoder_raptorq: Option<Decoder> = None;
+        if !self.chunks.contains_key(&chunk.header.index) {
+            let index = chunk.header.index;
+            let total_len = chunk.header.total as usize;
+            let packet_data = chunk.data.clone();
+            self.chunks.insert(index, chunk);
 
-    for (i, frame_result) in frames.enumerate() {
-        let frame = frame_result?;
-        frame_count += 1;
-
-        let buffer = frame.buffer();
-        let dynamic_image = DynamicImage::ImageRgba8(buffer.clone());
-
-        if let Ok(qr_bytes) = decode_qr_from_dynamic_image(&dynamic_image) {
-            let qr_string = String::from_utf8_lossy(&qr_bytes).to_string();
-            if let Ok(chunk_bytes) = BASE64.decode(&qr_string) {
-                if let Ok(chunk) = Chunk::from_bytes(&chunk_bytes) {
-                    if decoder_raptorq.is_none() {
-                        let config = ObjectTransmissionInformation::with_defaults(
-                            chunk.header.total as u64,
-                            chunk.header.packet_size,
-                        );
-                        decoder_raptorq = Some(Decoder::new(config));
-                        println!(
-                            "Initialized RaptorQ decoder (Size: {}, Packet: {})",
-                            chunk.header.total, chunk.header.packet_size
-                        );
-                    }
-
-                    if !chunks.contains_key(&chunk.header.index) {
-                        chunks.insert(chunk.header.index, chunk.clone());
-                        println!(
-                            "Found RaptorQ packet ESI {} in frame {}",
-                            chunk.header.index,
-                            i + 1
-                        );
-
-                        if let Some(dec) = &mut decoder_raptorq {
-                            let packet = EncodingPacket::deserialize(&chunk.data);
-                            if let Some(result_data) = dec.decode(packet) {
-                                println!("RaptorQ decoding successful at frame {}!", i + 1);
-                                let mut final_data = result_data;
-                                final_data.truncate(chunk.header.total as usize);
-                                let packed = decompress(&final_data)?;
-                                let (original_filename, data) = unpack_data(&packed)?;
-
-                                let final_output_path = match output_path {
-                                    Some(p) => p.to_path_buf(),
-                                    None => Path::new(".").join(&original_filename),
-                                };
-                                fs::write(&final_output_path, &data)?;
-
-                                return Ok(DecodeResult {
-                                    original_filename,
-                                    output_path: final_output_path
-                                        .to_string_lossy()
-                                        .to_string(),
-                                    num_chunks: chunks.len(),
-                                });
-                            }
-                        }
-                    }
+            if let Some(dec) = &mut self.decoder {
+                let packet = EncodingPacket::deserialize(&packet_data);
+                if let Some(result_data) = dec.decode(packet) {
+                    let mut final_data = result_data;
+                    final_data.truncate(total_len);
+                    let packed = decompress(&final_data)?;
+                    return Ok(Some(unpack_data(&packed)?));
                 }
             }
         }
+        Ok(None)
     }
 
-    if chunks.is_empty() {
-        return Err(anyhow!("No QR codes found in GIF"));
+    fn num_chunks(&self) -> usize {
+        self.chunks.len()
     }
-
-    Err(anyhow!(
-        "Could not decode with RaptorQ (insufficient packets after {} frames)",
-        frame_count
-    ))
 }
 
-pub fn decode_from_images(input_dir: &Path, output_path: Option<&Path>) -> Result<DecodeResult> {
-    let png_files: Vec<_> = fs::read_dir(input_dir)?
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .map(|ext| ext.to_ascii_lowercase() == "png")
-                .unwrap_or(false)
-        })
-        .map(|entry| entry.path())
-        .collect();
+fn decode_qr_bytes_to_chunk(qr_bytes: &[u8]) -> Option<Chunk> {
+    let qr_string = std::str::from_utf8(qr_bytes).ok()?;
+    let chunk_bytes = BASE64.decode(qr_string).ok()?;
+    Chunk::from_bytes(&chunk_bytes).ok()
+}
 
-    if png_files.is_empty() {
-        return Err(anyhow!("No PNG files found in directory"));
-    }
-
-    println!("Found {} QR code image(s)", png_files.len());
-
-    let mut chunks = HashMap::new();
-
-    for (i, png_path) in png_files.iter().enumerate() {
-        println!(
-            "  Decoding {}/{}: {}",
-            i + 1,
-            png_files.len(),
-            png_path.file_name().unwrap_or_default().to_string_lossy()
-        );
-
-        let qr_data = match decode_qr_image(png_path) {
-            Ok(d) => d,
-            Err(e) => {
-                println!("    Failed to decode: {}", e);
-                continue;
-            }
-        };
-
-        let qr_string = match String::from_utf8(qr_data) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-
-        let chunk_bytes = match BASE64.decode(&qr_string) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-
-        if let Ok(chunk) = Chunk::from_bytes(&chunk_bytes) {
-            chunks.insert(chunk.header.index, chunk);
-        }
-    }
-
-    if chunks.is_empty() {
-        return Err(anyhow!("No valid QR chunks found"));
-    }
-
-    let num_chunks = chunks.len();
-    let (original_filename, data) = reconstruct_raptorq(chunks.into_values().collect())?;
-
+fn save_decoded_file(
+    original_filename: String,
+    data: Vec<u8>,
+    num_chunks: usize,
+    output_path: Option<&Path>,
+    default_dir: &Path,
+) -> Result<DecodeResult> {
     let final_output_path = match output_path {
         Some(p) => p.to_path_buf(),
-        None => {
-            let parent = input_dir.parent().unwrap_or(Path::new("."));
-            parent.join(&original_filename)
-        }
+        None => default_dir.join(&original_filename),
     };
 
     fs::write(&final_output_path, &data)?;
@@ -210,4 +88,109 @@ pub fn decode_from_images(input_dir: &Path, output_path: Option<&Path>) -> Resul
         output_path: final_output_path.to_string_lossy().to_string(),
         num_chunks,
     })
+}
+
+fn decode_core<I>(
+    images: I,
+    output_file: Option<&Path>,
+    default_dir: &Path,
+) -> Result<DecodeResult>
+where
+    I: Iterator<Item = (Result<DynamicImage>, String)>,
+{
+    let mut rq_decoder = RaptorQStreamDecoder::new();
+    let mut count = 0;
+
+    for (img_result, label) in images {
+        count += 1;
+        let img = match img_result {
+            Ok(img) => img,
+            Err(e) => {
+                println!("    Failed to load {}: {}", label, e);
+                continue;
+            }
+        };
+
+        if let Ok(qr_bytes) = decode_qr_from_dynamic_image(&img) {
+            if let Some(chunk) = decode_qr_bytes_to_chunk(&qr_bytes) {
+                if let Some((original_filename, data)) = rq_decoder.add_chunk(chunk)? {
+                    println!("RaptorQ decoding successful at {}!", label);
+                    return save_decoded_file(
+                        original_filename,
+                        data,
+                        rq_decoder.num_chunks(),
+                        output_file,
+                        default_dir,
+                    );
+                }
+            }
+        }
+    }
+
+    if rq_decoder.num_chunks() == 0 {
+        return Err(anyhow!("No valid QR chunks found"));
+    }
+
+    Err(anyhow!(
+        "Could not decode with RaptorQ (insufficient packets after {} items)",
+        count
+    ))
+}
+
+pub fn decode_from_gif(input_file: &Path, output_file: Option<&Path>) -> Result<DecodeResult> {
+    let file = File::open(input_file)?;
+    let reader = BufReader::new(file);
+    let gif_decoder = GifDecoder::new(reader)?;
+    let frames = gif_decoder.into_frames();
+
+    println!("Decoding QR codes from GIF: {}", input_file.display());
+
+    let images = frames.enumerate().map(|(i, frame_result)| {
+        let label = format!("frame {}", i + 1);
+        let res = frame_result
+            .map(|frame| DynamicImage::ImageRgba8(frame.buffer().clone()))
+            .map_err(anyhow::Error::from);
+        (res, label)
+    });
+
+    decode_core(images, output_file, Path::new("."))
+}
+
+pub fn decode_from_images(input_dir: &Path, output_file: Option<&Path>) -> Result<DecodeResult> {
+    let images_files: Vec<_> = fs::read_dir(input_dir)?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .map(|ext| ext.to_ascii_lowercase() == QR_FILE_EXTENSION)
+                .unwrap_or(false)
+        })
+        .map(|entry| entry.path())
+        .collect();
+
+    if images_files.is_empty() {
+        return Err(anyhow!(
+            "No image ({}) files found in directory",
+            QR_FILE_EXTENSION
+        ));
+    }
+
+    println!("Found {} QR code image(s)", images_files.len());
+
+    let images = images_files.into_iter().map(|path| {
+        let label = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let res = image::open(path).map_err(anyhow::Error::from);
+        (res, label)
+    });
+
+    decode_core(
+        images,
+        output_file,
+        input_dir.parent().unwrap_or(Path::new(".")),
+    )
 }

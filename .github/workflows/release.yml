@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  # Build Cross-Platform Binaries (Pure Rust)
+  # Build Cross-Platform Binaries
   # Builds both fountain-encode and fountain-decode for all platforms
   build-binaries:
     name: Build Binaries ${{ matrix.target }}

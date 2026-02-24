@@ -15,6 +15,8 @@ use rqrr::PreparedImage;
 #[cfg(any(feature = "encode", feature = "decode"))]
 use std::path::Path;
 
+pub const QR_FILE_EXTENSION: &str = "png";
+
 #[cfg(feature = "encode")]
 pub fn generate_qr_image(
     data: &[u8],
@@ -45,12 +47,6 @@ pub fn generate_qr_image(
 pub fn save_qr_image(image: &RgbImage, path: &Path) -> Result<()> {
     image.save(path)?;
     Ok(())
-}
-
-#[cfg(feature = "decode")]
-pub fn decode_qr_image(path: &Path) -> Result<Vec<u8>> {
-    let img = image::open(path)?;
-    decode_qr_from_dynamic_image(&img)
 }
 
 #[cfg(any(feature = "decode", feature = "wasm"))]
