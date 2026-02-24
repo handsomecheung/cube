@@ -193,3 +193,48 @@ fn test_terminal_generation() {
         );
     }
 }
+
+#[test]
+#[cfg(all(feature = "encode", feature = "decode"))]
+fn test_encoding_efficiency() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let input_path = temp_dir.path().join("efficiency_input.bin");
+    let output_gif_path = temp_dir.path().join("efficiency_output.gif");
+
+    // 1. Prepare sample data (10KB of random data to ensure Zlib doesn't compress it away)
+    let data_size = 10 * 1024;
+    let data: Vec<u8> = (0..data_size).map(|_| rand::random::<u8>()).collect();
+    fs::write(&input_path, &data).expect("Failed to write test data");
+
+    // 2. Perform end-to-end encoding
+    // Use fixed chunk size 500 and pixel scale 4 for consistent comparison
+    let result = fountain::encode_file_to_gif(
+        &input_path,
+        &output_gif_path,
+        Some(500),
+        100, // interval
+        4,   // pixel scale
+    )
+    .expect("Encoding failed");
+
+    let gif_metadata = fs::metadata(&output_gif_path).expect("Failed to get GIF metadata");
+    let gif_size = gif_metadata.len();
+
+    println!("\n--- End-to-End Encoding Efficiency Report ---");
+    println!("Original Data Size:    {} bytes", data_size);
+    println!("Number of QR Frames:   {}", result.num_chunks);
+    println!("Resulting GIF Size:    {} bytes", gif_size);
+
+    let expansion_ratio = gif_size as f64 / data_size as f64;
+    println!(
+        "Expansion Ratio:       {:.2}x (GIF Size / Original Size)",
+        expansion_ratio
+    );
+
+    let bytes_per_frame = data_size as f64 / result.num_chunks as f64;
+    println!("Avg Data per Frame:    {:.2} bytes/frame", bytes_per_frame);
+    println!("--------------------------------------------\n");
+}
