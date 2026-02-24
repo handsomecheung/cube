@@ -1,6 +1,5 @@
 use crate::chunk::{decompress, unpack_data, Chunk};
 use crate::qr::decode_qr_from_gray;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use image::GrayImage;
 use raptorq::{Decoder, EncodingPacket, ObjectTransmissionInformation};
 use std::collections::HashMap;
@@ -102,8 +101,8 @@ impl QrStreamDecoder {
 
     fn try_decode(&mut self, img: &GrayImage) -> Option<ScanResult> {
         if let Ok(qr_bytes) = decode_qr_from_gray(img) {
-            let qr_string = String::from_utf8_lossy(&qr_bytes).to_string();
-            if let Ok(chunk_bytes) = BASE64.decode(qr_string.trim()) {
+            let qr_string = String::from_utf8_lossy(&qr_bytes);
+            if let Ok(chunk_bytes) = base45::decode(qr_string.trim()) {
                 if let Ok(chunk) = Chunk::from_bytes(&chunk_bytes) {
                     return Some(self.process_chunk(chunk));
                 }

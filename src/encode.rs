@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Result};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use image::codecs::gif::GifEncoder;
 use image::{Delay, Frame, RgbaImage};
 use qrcode::Version;
@@ -79,7 +78,7 @@ where
             };
 
             let chunk_bytes = chunk.to_bytes()?;
-            let encoded = BASE64.encode(&chunk_bytes);
+            let encoded = base45::encode(&chunk_bytes);
 
             if fit_check_fn(encoded.as_bytes())? {
                 // Fits. Generate all packets.
@@ -159,7 +158,7 @@ pub fn encode_file_for_terminal(
 
     for chunk in chunks {
         let chunk_bytes = chunk.to_bytes()?;
-        let encoded = BASE64.encode(&chunk_bytes);
+        let encoded = base45::encode(&chunk_bytes);
         let qr_string = render_qr_to_terminal(encoded.as_bytes())?;
         qr_strings.push(qr_string);
     }
@@ -186,7 +185,7 @@ where
 
     for (i, chunk) in chunks.iter().enumerate() {
         let chunk_bytes = chunk.to_bytes()?;
-        let encoded = BASE64.encode(&chunk_bytes);
+        let encoded = base45::encode(&chunk_bytes);
 
         let (qr_image, version) =
             generate_qr_image(encoded.as_bytes(), fixed_version, pixel_scale)?;

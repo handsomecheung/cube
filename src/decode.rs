@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Result};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use image::codecs::gif::GifDecoder;
 use image::{AnimationDecoder, DynamicImage};
 use raptorq::{Decoder, EncodingPacket, ObjectTransmissionInformation};
@@ -65,7 +64,7 @@ impl RaptorQStreamDecoder {
 
 fn decode_qr_bytes_to_chunk(qr_bytes: &[u8]) -> Option<Chunk> {
     let qr_string = std::str::from_utf8(qr_bytes).ok()?;
-    let chunk_bytes = BASE64.decode(qr_string).ok()?;
+    let chunk_bytes = base45::decode(qr_string).ok()?;
     Chunk::from_bytes(&chunk_bytes).ok()
 }
 
