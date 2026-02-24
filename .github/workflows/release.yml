@@ -9,29 +9,29 @@ permissions:
   contents: write
 
 jobs:
-  # Build Cross-Platform Encode (Pure Rust)
-  # Builds fountain-encode for all platforms (no OpenCV required)
-  build-encode-cross:
-    name: Build Encode ${{ matrix.target }}
+  # Build Cross-Platform Binaries (Pure Rust)
+  # Builds both fountain-encode and fountain-decode for all platforms
+  build-binaries:
+    name: Build Binaries ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            asset_name: fountain-encode-linux-x86_64
+            suffix: linux-x86_64
           - os: ubuntu-latest
             target: aarch64-unknown-linux-musl
-            asset_name: fountain-encode-linux-aarch64
+            suffix: linux-aarch64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            asset_name: fountain-encode-windows-x86_64.exe
+            suffix: windows-x86_64
           - os: macos-latest
             target: x86_64-apple-darwin
-            asset_name: fountain-encode-macos-x86_64
+            suffix: macos-x86_64
           - os: macos-latest
             target: aarch64-apple-darwin
-            asset_name: fountain-encode-macos-aarch64
+            suffix: macos-aarch64
 
     steps:
       - name: Checkout code
@@ -60,28 +60,32 @@ jobs:
           linker = "aarch64-linux-gnu-gcc"
           EOF
 
-      - name: Build Encode
-        run: cargo build --release --bin fountain-encode --no-default-features --features encode --target ${{ matrix.target }}
+      - name: Build Binaries
+        run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Strip binary (Unix)
+      - name: Strip binaries (Unix)
         if: matrix.os != 'windows-latest'
         run: |
           if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
             aarch64-linux-gnu-strip target/${{ matrix.target }}/release/fountain-encode
+            aarch64-linux-gnu-strip target/${{ matrix.target }}/release/fountain-decode
           else
             strip target/${{ matrix.target }}/release/fountain-encode
+            strip target/${{ matrix.target }}/release/fountain-decode
           fi
 
       - name: Prepare Artifact
         shell: bash
         run: |
           mkdir dist
-          cp target/${{ matrix.target }}/release/fountain-encode${{ matrix.os == 'windows-latest' && '.exe' || '' }} dist/${{ matrix.asset_name }}
+          EXE_EXT="${{ matrix.os == 'windows-latest' && '.exe' || '' }}"
+          cp target/${{ matrix.target }}/release/fountain-encode$EXE_EXT dist/fountain-encode-${{ matrix.suffix }}$EXE_EXT
+          cp target/${{ matrix.target }}/release/fountain-decode$EXE_EXT dist/fountain-decode-${{ matrix.suffix }}$EXE_EXT
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: encode-${{ matrix.target }}
+          name: binaries-${{ matrix.target }}
           path: dist/*
 
   # Build WASM
@@ -118,7 +122,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-encode-cross, build-wasm]
+    needs: [build-binaries, build-wasm]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
