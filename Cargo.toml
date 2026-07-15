@@ -1,6 +1,6 @@
 [package]
 name = "fountain-core"
-version = "0.1.4"
+version = "0.1.6"
 edition = "2021"
 description = "Convert any file to QR codes and back"
 license = "Apache-2.0"
