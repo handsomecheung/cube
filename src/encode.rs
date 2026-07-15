@@ -25,26 +25,20 @@ pub struct TerminalQrData {
 
 /// Internal helper to handle the common logic of reading, compressing, and finding the optimal
 /// packet size for RaptorQ encoding while ensuring it fits via a provided check.
-fn prepare_chunks<F>(
-    input_path: &Path,
+fn prepare_chunks_from_data<F>(
+    data: &[u8],
+    filename: &str,
     chunk_size: Option<usize>,
     default_size: usize,
     min_size: usize,
     reduction_step: usize,
     redundancy_factor: f64,
     fit_check_fn: F,
-) -> Result<(Vec<Chunk>, usize, String)>
+) -> Result<(Vec<Chunk>, usize)>
 where
     F: Fn(&[u8]) -> Result<bool>,
 {
-    let data = fs::read(input_path)?;
-    let filename = input_path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| anyhow!("Invalid filename"))?
-        .to_string();
-
-    let packed = pack_data(&data, &filename);
+    let packed = pack_data(data, filename);
     let compressed = compress(&packed)?;
 
     let mut current_size = chunk_size.unwrap_or(default_size);
@@ -101,7 +95,7 @@ where
                     });
                 }
 
-                return Ok((chunks, current_size, filename));
+                return Ok((chunks, current_size));
             }
         }
 
@@ -118,16 +112,16 @@ where
     ))
 }
 
-/// Helper function to split data into chunks using RaptorQ and ensure they fit into QR codes.
-/// Returns the chunks, the effective payload size used, and the filename string.
-fn prepare_chunks_for_img(
-    input_path: &Path,
+fn prepare_chunks_from_data_for_img(
+    data: &[u8],
+    filename: &str,
     chunk_size: Option<usize>,
     pixel_scale: u32,
     redundancy_factor: f64,
-) -> Result<(Vec<Chunk>, usize, String)> {
-    prepare_chunks(
-        input_path,
+) -> Result<(Vec<Chunk>, usize)> {
+    prepare_chunks_from_data(
+        data,
+        filename,
         chunk_size,
         crate::chunk::MAX_PAYLOAD_SIZE,
         100, // min_size
@@ -138,12 +132,14 @@ fn prepare_chunks_for_img(
     .map_err(|e| anyhow!("Failed to generate QR codes: {}", e))
 }
 
-pub fn encode_file_for_terminal(
-    input_path: &Path,
+pub fn encode_data_for_terminal(
+    data: &[u8],
+    filename: &str,
     chunk_size: Option<usize>,
 ) -> Result<TerminalQrData> {
-    let (chunks, effective_size, filename) = prepare_chunks(
-        input_path,
+    let (chunks, effective_size) = prepare_chunks_from_data(
+        data,
+        filename,
         chunk_size,
         DEFAULT_PAYLOAD_SIZE,
         50, // min_size
@@ -164,11 +160,23 @@ pub fn encode_file_for_terminal(
     }
 
     Ok(TerminalQrData {
-        filename,
+        filename: filename.to_string(),
         total,
         qr_strings,
         effective_size,
     })
+}
+
+pub fn encode_file_for_terminal(
+    input_path: &Path,
+    chunk_size: Option<usize>,
+) -> Result<TerminalQrData> {
+    let data = fs::read(input_path)?;
+    let filename = input_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| anyhow!("Invalid filename"))?;
+    encode_data_for_terminal(&data, filename, chunk_size)
 }
 
 /// Internal helper to process a sequence of chunks as QR images with a consistent version.
@@ -200,16 +208,17 @@ where
     Ok(())
 }
 
-pub fn encode_file_to_images(
-    input_path: &Path,
+pub fn encode_data_to_images(
+    data: &[u8],
+    filename: &str,
     output_dir: &Path,
     chunk_size: Option<usize>,
     pixel_scale: u32,
 ) -> Result<EncodeResult> {
     fs::create_dir_all(output_dir)?;
 
-    let (chunks, effective_size, filename) =
-        prepare_chunks_for_img(input_path, chunk_size, pixel_scale, 1.5)?;
+    let (chunks, effective_size) =
+        prepare_chunks_from_data_for_img(data, filename, chunk_size, pixel_scale, 1.5)?;
 
     let mut output_files = Vec::with_capacity(chunks.len());
 
@@ -241,15 +250,30 @@ pub fn encode_file_to_images(
     })
 }
 
-pub fn encode_file_to_gif(
+pub fn encode_file_to_images(
     input_path: &Path,
+    output_dir: &Path,
+    chunk_size: Option<usize>,
+    pixel_scale: u32,
+) -> Result<EncodeResult> {
+    let data = fs::read(input_path)?;
+    let filename = input_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| anyhow!("Invalid filename"))?;
+    encode_data_to_images(&data, filename, output_dir, chunk_size, pixel_scale)
+}
+
+pub fn encode_data_to_gif(
+    data: &[u8],
+    filename: &str,
     output_gif: &Path,
     chunk_size: Option<usize>,
     interval_ms: u64,
     pixel_scale: u32,
 ) -> Result<EncodeResult> {
-    let (chunks, effective_size, _filename) =
-        prepare_chunks_for_img(input_path, chunk_size, pixel_scale, 1.5)?;
+    let (chunks, effective_size) =
+        prepare_chunks_from_data_for_img(data, filename, chunk_size, pixel_scale, 1.5)?;
 
     if let Some(parent) = output_gif.parent() {
         fs::create_dir_all(parent)?;
@@ -278,4 +302,19 @@ pub fn encode_file_to_gif(
         output_files: vec![output_gif.to_string_lossy().to_string()],
         effective_size,
     })
+}
+
+pub fn encode_file_to_gif(
+    input_path: &Path,
+    output_gif: &Path,
+    chunk_size: Option<usize>,
+    interval_ms: u64,
+    pixel_scale: u32,
+) -> Result<EncodeResult> {
+    let data = fs::read(input_path)?;
+    let filename = input_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| anyhow!("Invalid filename"))?;
+    encode_data_to_gif(&data, filename, output_gif, chunk_size, interval_ms, pixel_scale)
 }

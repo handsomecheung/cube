@@ -52,6 +52,7 @@ async function startCamera() {
         stopBtn.disabled = false;
         scanLine.style.display = "block";
         downloadArea.style.display = "none";
+        document.getElementById("content-display-area").style.display = "none";
 
         statusDiv.firstChild.textContent = "Scanning...";
         progressFill.style.width = "0%";
@@ -105,9 +106,19 @@ function scanLoop() {
 
     if (status === ScanStatus.Complete) {
         stopCamera();
-        statusDiv.firstChild.textContent = `Completed! Decoded: ${result.get_filename()}`;
+        const filename = result.get_filename();
+        const fileData = result.get_file_data();
+
         progressFill.style.width = "100%";
-        enableDownload(result.get_filename(), result.get_file_data());
+
+        if (filename === "") {
+            const text = new TextDecoder().decode(fileData);
+            statusDiv.firstChild.textContent = "Completed! Decoded Content String.";
+            showContent(text);
+        } else {
+            statusDiv.firstChild.textContent = `Completed! Decoded: ${filename}`;
+            enableDownload(filename, fileData);
+        }
         return;
     }
 
@@ -127,6 +138,13 @@ function enableDownload(filename, data) {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     };
+}
+
+function showContent(text) {
+    const displayArea = document.getElementById("content-display-area");
+    const textArea = document.getElementById("decoded-text");
+    displayArea.style.display = "block";
+    textArea.value = text;
 }
 
 run();

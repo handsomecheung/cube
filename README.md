@@ -83,13 +83,15 @@ Try the Web Scanner directly on your mobile device:
 ### Encoding (Sender)
 
 ```bash
-fountain-encode [OPTIONS] <INPUT>
+fountain-encode [OPTIONS] [INPUT]
 ```
 
 **Arguments:**
-- `<INPUT>`: Path to the input file you want to encode.
+- `[INPUT]`: Backward compatibility: Path to the input file you want to encode.
 
 **Options:**
+- `-f, --file <FILE>`: Path to the input file you want to encode.
+- `-c, --content <STRING>`: Raw text content string you want to encode.
 - `-t, --terminal`: Display QR codes directly in your terminal using a carousel.
 - `-g, --gif-output-file <FILE>`: Save the QR stream as an optimized animated GIF.
 - `-m, --image-output-dir <DIR>`: Export QR codes as a series of individual image files (PNG).
@@ -102,7 +104,16 @@ fountain-encode [OPTIONS] <INPUT>
 
 *Terminal Carousel (Quickest for one-off transfers):*
 ```bash
+# Using positional argument (backward compatibility)
 fountain-encode my_secret.key --terminal --interval 500
+
+# Using explicit --file flag
+fountain-encode -f my_secret.key --terminal --interval 500
+```
+
+*Encoding raw text content string:*
+```bash
+fountain-encode -c "Hello, world!" --terminal
 ```
 
 *Generate an optimized GIF:*

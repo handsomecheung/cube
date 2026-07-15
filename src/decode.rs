@@ -77,7 +77,14 @@ fn save_decoded_file(
 ) -> Result<DecodeResult> {
     let final_output_path = match output_path {
         Some(p) => p.to_path_buf(),
-        None => default_dir.join(&original_filename),
+        None => {
+            let filename = if original_filename.is_empty() {
+                "decoded_content.txt"
+            } else {
+                &original_filename
+            };
+            default_dir.join(filename)
+        }
     };
 
     fs::write(&final_output_path, &data)?;

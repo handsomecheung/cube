@@ -40,6 +40,44 @@ fn test_encode_decode_roundtrip() {
 }
 
 #[test]
+#[cfg(all(feature = "encode", feature = "decode"))]
+fn test_encode_decode_content_roundtrip() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let qr_output_dir = temp_dir.path().join("qr_output_content");
+
+    fs::create_dir(&qr_output_dir).expect("Failed to create qr output dir");
+
+    let original_content = "Hello, world! This is a test for content string encoding and decoding.";
+    let data = original_content.as_bytes();
+
+    println!("Encoding content...");
+    // Pass empty filename to simulate --content CLI mode
+    let encode_result = fountain_core::encode_data_to_images(data, "", &qr_output_dir, None, 4)
+        .expect("Encoding failed");
+
+    assert!(encode_result.num_chunks > 0);
+
+    let entries = fs::read_dir(&qr_output_dir).expect("Failed to read qr output dir");
+    let count = entries.count();
+    assert_eq!(count, encode_result.num_chunks);
+
+    println!("Decoding content...");
+    // Do not pass output path to test fallback to default "decoded_content.txt"
+    let decode_result = fountain_core::decode_from_images(&qr_output_dir, None)
+        .expect("Decoding failed");
+
+    assert!(decode_result.num_chunks > 0);
+    assert_eq!(decode_result.original_filename, "");
+    
+    // Check fallback filename output
+    let expected_output = qr_output_dir.parent().unwrap().join("decoded_content.txt");
+    let decoded_content =
+        fs::read_to_string(&expected_output).expect("Failed to read decoded file");
+
+    assert_eq!(original_content, decoded_content);
+}
+
+#[test]
 #[cfg(feature = "encode")]
 fn test_encode_images_size_consistency() {
     use image::GenericImageView;
