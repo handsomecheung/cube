@@ -7,7 +7,7 @@ license = "Apache-2.0"
 default-run = "fountain-encode"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib", "rlib", "staticlib"]
 
 [features]
 default = ["encode", "decode"]

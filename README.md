@@ -30,6 +30,7 @@ To maximize the data capacity of each QR code while maintaining high scannabilit
 - 🎞️ **GIF Support:** Generate optimized, dither-free GIFs for easy sharing.
 - 🖼️ **Image Export:** Save QR codes as a series of PNG images.
 - 🌐 **Web Scanner (WASM):** Decode QR codes directly in your browser using your phone's camera. Perfect for receiving files on mobile without installing any apps.
+- 🔌 **C-API (FFI) Support:** Build as a shared (`.so`/`.dylib`/`.dll`) or static (`.a`/`.lib`) library to integrate fountain decoding into C/C++, iOS, Android, or other languages.
 - 🛠️ **Configurable:** Adjust pixel scale, payload size, and carousel intervals to match your hardware's capabilities.
 - 🦀 **Pure Rust:** The project is now 100% Rust with no heavy external dependencies like OpenCV.
 
@@ -131,6 +132,98 @@ fountain-decode my_transfer.gif -o restored_file.zip
 *Decode from a directory of images:*
 ```bash
 fountain-decode ./qr_frames/
+```
+
+### C-API (FFI) Usage
+
+Fountain Core can be compiled as a shared or static library to be integrated into other languages (such as C/C++, Swift, Kotlin, Python, etc.).
+
+#### Building the Libraries
+
+To build the static (`.a`/`.lib`) and dynamic (`.so`/`.dylib`/`.dll`) libraries, run:
+
+```bash
+cargo build --release
+```
+
+The output files will be generated in `target/release/`:
+- **Static library:** `libfountain_core.a` (Linux/macOS) or `fountain_core.lib` (Windows)
+- **Shared library:** `libfountain_core.so` (Linux), `libfountain_core.dylib` (macOS), or `fountain_core.dll` (Windows)
+
+#### API Reference (C Header)
+
+Here are the exported C-compatible functions declared in [src/ffi.rs](file:///mnt/coder-workspaces/private-workspace/repos/github/fountain-core/src/ffi.rs):
+
+```c
+#include <stdint.h>
+
+// Opaque struct representing the fountain decoder instance
+typedef struct FfiDecoder FfiDecoder;
+
+// Result codes returned by fountain_decoder_feed
+#define FOUNTAIN_RESULT_SCANNING   0  // Scanning (No new unique chunk found, or duplicate chunk)
+#define FOUNTAIN_RESULT_FOUND      1  // New unique chunk added to the decoder
+#define FOUNTAIN_RESULT_COMPLETE   2  // Decoding completed and verified
+#define FOUNTAIN_RESULT_ERROR      3  // An error occurred during parsing or decoding
+
+/**
+ * Create a new FfiDecoder instance.
+ * Caller is responsible for freeing the memory via fountain_decoder_free.
+ */
+FfiDecoder* fountain_decoder_create(void);
+
+/**
+ * Free the memory of the FfiDecoder instance.
+ */
+void fountain_decoder_free(FfiDecoder* ptr);
+
+/**
+ * Feed a Base45 encoded QR frame string to the decoder.
+ *
+ * @param ptr Pointer to the FfiDecoder.
+ * @param qr_str_ptr C-string containing the scanned QR code content.
+ * @param out_current Pointer to write the current number of unique chunks decoded.
+ * @param out_total Pointer to write the total estimated chunks required.
+ * @return Result code (0 to 3).
+ */
+int32_t fountain_decoder_feed(
+    FfiDecoder* ptr,
+    const char* qr_str_ptr,
+    uint32_t* out_current,
+    uint32_t* out_total
+);
+
+/**
+ * Get the original filename of the decoded file.
+ * Returns a C-string allocated on the Rust heap, which must be freed by calling fountain_free_string.
+ * Returns NULL if the file has not been fully decoded yet.
+ */
+char* fountain_decoder_get_filename(FfiDecoder* ptr);
+
+/**
+ * Get the size in bytes of the decoded file.
+ * Returns 0 if the file has not been fully decoded yet.
+ */
+uint32_t fountain_decoder_get_data_size(FfiDecoder* ptr);
+
+/**
+ * Copy the decoded file content into a pre-allocated buffer.
+ *
+ * @param ptr Pointer to the FfiDecoder.
+ * @param buf Pointer to the output buffer.
+ * @param buf_len Size of the output buffer.
+ * @return 0 on success, negative values on error (-1: null pointers, -2: buffer too small, -3: data not ready).
+ */
+int32_t fountain_decoder_copy_data(
+    FfiDecoder* ptr,
+    uint8_t* buf,
+    uint32_t buf_len
+);
+
+/**
+ * Free a C-string returned by fountain_decoder_get_filename.
+ */
+void fountain_free_string(char* str_ptr);
 ```
 
 
