@@ -1,5 +1,66 @@
+#[cfg(feature = "encode")]
 use std::fs;
+#[cfg(feature = "encode")]
 use tempfile::TempDir;
+
+#[test]
+#[cfg(feature = "decode")]
+fn test_decoder_ffi_rejects_malformed_chunks_without_crashing() {
+    use fountain_core::{
+        ffi::{fountain_decoder_create, fountain_decoder_feed, fountain_decoder_free},
+        Chunk, ChunkHeader,
+    };
+    use std::ffi::CString;
+
+    fn encode_chunk(header: ChunkHeader, data: Vec<u8>) -> CString {
+        let bytes = Chunk { header, data }
+            .to_bytes()
+            .expect("test chunk should serialize");
+        CString::new(base45::encode(&bytes)).expect("base45 output should not contain nul")
+    }
+
+    let malformed_inputs = [
+        encode_chunk(
+            ChunkHeader {
+                version: 1,
+                total: 1,
+                index: 0,
+                packet_size: 0,
+            },
+            vec![],
+        ),
+        encode_chunk(
+            ChunkHeader {
+                version: 1,
+                total: 1,
+                index: 0,
+                packet_size: 4,
+            },
+            vec![],
+        ),
+    ];
+
+    unsafe {
+        let decoder = fountain_decoder_create();
+        assert!(!decoder.is_null());
+
+        for input in malformed_inputs {
+            let mut current = 123;
+            let mut total = 456;
+            let result = fountain_decoder_feed(
+                decoder,
+                input.as_ptr(),
+                &mut current,
+                &mut total,
+            );
+            assert_eq!(result, 0);
+            assert_eq!(current, 123);
+            assert_eq!(total, 456);
+        }
+
+        fountain_decoder_free(decoder);
+    }
+}
 
 #[test]
 #[cfg(all(feature = "encode", feature = "decode"))]
