@@ -235,6 +235,50 @@ int32_t fountain_decoder_copy_data(
  * Free a C-string returned by fountain_decoder_get_filename.
  */
 void fountain_free_string(char* str_ptr);
+
+// Opaque struct representing the fountain encoder instance
+typedef struct FfiEncoder FfiEncoder;
+
+/**
+ * Create a new FfiEncoder from raw file data.
+ * Pre-computes a fixed-size sequence of Base45 encoded QR packet strings; the caller
+ * renders each packet as a QR code (e.g. with a platform-native QR library) and cycles
+ * through them. Per the Fountain Codes design, any sufficiently large subset of packets,
+ * scanned in any order, is enough for the receiver to reconstruct the file.
+ *
+ * @param data_ptr Pointer to the raw file bytes.
+ * @param data_len Length of the raw file bytes.
+ * @param filename_ptr C-string with the original filename, embedded in the stream metadata.
+ * @param chunk_size Max payload size (bytes) per QR packet. Pass 0 to use the built-in default.
+ * @param out_total_packets Pointer to write the total number of packets generated.
+ * @return Pointer to the new FfiEncoder, or NULL on error (invalid input, or data too large
+ *         to fit at the requested chunk_size). Caller is responsible for freeing the memory
+ *         via fountain_encoder_free.
+ */
+FfiEncoder* fountain_encoder_create(
+    const uint8_t* data_ptr,
+    uint32_t data_len,
+    const char* filename_ptr,
+    uint32_t chunk_size,
+    uint32_t* out_total_packets
+);
+
+/**
+ * Free the memory of the FfiEncoder instance.
+ */
+void fountain_encoder_free(FfiEncoder* ptr);
+
+/**
+ * Get the total number of packets in the encoded stream.
+ */
+uint32_t fountain_encoder_get_total_packets(FfiEncoder* ptr);
+
+/**
+ * Get the Base45 encoded QR packet string at the given index.
+ * Returns NULL if ptr is null or index is out of range.
+ * Caller must free the returned string via fountain_free_string.
+ */
+char* fountain_encoder_get_packet(FfiEncoder* ptr, uint32_t index);
 ```
 
 

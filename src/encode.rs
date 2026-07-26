@@ -80,7 +80,14 @@ where
                 let total_packets = (source_packets as f64 * redundancy_factor).ceil() as u32;
                 let total_packets = total_packets.max(source_packets + 2);
 
-                let packets_data = rq_encoder.get_encoded_packets(total_packets);
+                // `get_encoded_packets` takes the number of *repair* packets to generate
+                // on top of the systematic source packets it always includes, not a total
+                // packet count. Passing `total_packets` directly here (as this code used
+                // to) would yield `source_packets + total_packets` packets -- roughly
+                // double what was intended -- so we subtract `source_packets` back out to
+                // land on the actual `total_packets` we computed above.
+                let repair_packets = total_packets.saturating_sub(source_packets);
+                let packets_data = rq_encoder.get_encoded_packets(repair_packets);
                 let mut chunks = Vec::with_capacity(packets_data.len());
 
                 for (i, packet) in packets_data.into_iter().enumerate() {
@@ -130,6 +137,26 @@ fn prepare_chunks_from_data_for_img(
         |encoded| Ok(generate_qr_image(encoded, None, pixel_scale).is_ok()),
     )
     .map_err(|e| anyhow!("Failed to generate QR codes: {}", e))
+}
+
+/// Prepares chunks for FFI consumption: no rendering/fit constraints are applied, the
+/// requested (or default) payload size is used as-is.
+pub(crate) fn prepare_chunks_from_data_for_ffi(
+    data: &[u8],
+    filename: &str,
+    chunk_size: Option<usize>,
+    redundancy_factor: f64,
+) -> Result<(Vec<Chunk>, usize)> {
+    prepare_chunks_from_data(
+        data,
+        filename,
+        chunk_size,
+        DEFAULT_PAYLOAD_SIZE,
+        50,  // min_size
+        20,  // reduction_step
+        redundancy_factor,
+        |_encoded| Ok(true),
+    )
 }
 
 pub fn encode_data_for_terminal(

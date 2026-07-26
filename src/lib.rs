@@ -32,5 +32,5 @@ pub use encode::{
 #[cfg(feature = "encode")]
 pub use terminal::{display_qr_carousel, display_qr_once};
 
-#[cfg(feature = "decode")]
+#[cfg(any(feature = "decode", feature = "encode"))]
 pub mod ffi;
